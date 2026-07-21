@@ -3,195 +3,133 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>超高速ローカル金庫スキャナー</title>
+  <title>商品マスタ＆実績参照照会システム</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body { font-family: -apple-system, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; text-align: center; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; text-align: center; color: #333; }
     .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 420px; margin: 0 auto; }
-    h2 { font-size: 1.1em; color: #333; margin-top: 0; }
+    h2 { font-size: 1.1em; color: #1e293b; margin-top: 0; margin-bottom: 12px; }
     #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 12px; background: #000; }
-
-    .confirm-box { text-align: left; background: #eef2f5; padding: 12px; border-radius: 8px; margin-top: 12px; display: none; }
-    .label { font-size: 0.75em; color: #666; margin-top: 6px; }
-    .val { font-size: 1em; font-weight: bold; color: #333; }
-    .spec { font-size: 0.85em; color: #007bff; font-weight: bold; }
-
+    
+    .result-box { text-align: left; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-top: 12px; display: none; }
+    .label { font-size: 0.75em; color: #64748b; margin-top: 6px; font-weight: bold; }
+    .val { font-size: 1.05em; font-weight: bold; color: #0f172a; word-break: break-all; }
+    .spec { font-size: 0.85em; color: #2563eb; font-weight: bold; }
+    
     .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8em; }
-    .history-table th, .history-table td { border: 1px solid #ccc; padding: 4px 2px; text-align: center; }
-    .history-table th { background: #e0e6ed; }
+    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 6px 2px; text-align: center; }
+    .history-table th { background: #f1f5f9; color: #475569; }
+    .history-table td { font-weight: bold; color: #0f172a; background: #fff; }
 
-    input[type="number"] { width: 70px; padding: 6px; font-size: 1em; border-radius: 4px; border: 1px solid #ccc; }
-
-    #status { font-weight: bold; margin: 8px 0; color: #007bff; font-size: 0.9em; }
-    .btn-main { background: #007bff; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; }
-    .btn-save { background: #28a745; color: white; border: none; padding: 10px; font-size: 1em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; }
-    .btn-cancel { background: #6c757d; color: white; border: none; padding: 6px; font-size: 0.85em; border-radius: 4px; width: 100%; margin-top: 6px; cursor: pointer; }
-    .btn-reload { background: #f39c12; color: white; border: none; padding: 6px; font-size: 0.75em; border-radius: 4px; margin-top: 15px; cursor: pointer; }
+    #status { font-weight: bold; margin: 10px 0; color: #2563eb; font-size: 0.9em; min-height: 1.2em; }
+    .btn-main { background: #2563eb; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
+    .btn-next { background: #475569; color: white; border: none; padding: 10px; font-size: 0.9em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 12px; }
+    .loading-spinner { font-size: 0.8em; color: #d97706; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>無音スキャナー（金庫キャッシュ版）</h2>
-
-  <div id="status">⚡️ ローカル金庫確認中...</div>
+  <h2>無音スキャナー（実績参照専用）</h2>
+  
+  <div id="status">⚡️ 商品マスタ初期化中...</div>
   <div id="reader" style="display:none;"></div>
-
+  
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
-  <div id="confirm-box" class="confirm-box">
+  <div id="result-box" class="result-box">
     <div class="label">JANコード</div>
     <div class="val" id="res-code">-</div>
-
+    
     <div class="label">商品名</div>
     <div class="val" id="res-name">-</div>
-
+    
     <div class="label">規格</div>
     <div class="spec" id="res-spec">-</div>
 
-    <div class="label">📊 直近7日間の日別販売実績（日付・曜日）</div>
-    <div class="label">📊 直近7日間の日別販売実績</div>
-    <table class="history-table">
+    <div class="label" style="margin-top:12px;">📊 直近7日間の日別販売実績</div>
+    <div id="history-status" class="loading-spinner">実績データを照会中...</div>
+    <table class="history-table" id="history-table" style="display:none;">
       <thead>
         <tr id="history-header"></tr>
-@@ -66,19 +66,23 @@
-    <button class="btn-cancel" onclick="resumeScan()">キャンセルして次をスキャン</button>
+      </thead>
+      <tbody>
+        <tr id="history-values"></tr>
+      </tbody>
+    </table>
+    
+    <button class="btn-next" onclick="resumeScan()">次をスキャン</button>
   </div>
-
-  <button class="btn-reload" onclick="forceReloadData()">🔄 マスタ＆実績データを最新に更新（再ダウンロード）</button>
-  <button class="btn-reload" onclick="forceReloadData()">🔄 マスタ＆実績データを最新に更新</button>
 </div>
 
 <script>
-  // ★GASのURLを貼り付けてください！
+  // 指定のGASウェブアプリURL
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
-
-  let html5QrCode;
-  let itemMasterMap = {};
-  let recentDays = [];
-  let historyData = {};
-  let currentItem = null;
   
-  // 💡 フリーズ防止用の処理ロックフラグ
-  let isProcessing = false; 
+  let html5QrCode;
+  let itemMasterMap = {}; // RAM（メモリ）一時キャッシュ用
+  let isProcessing = false;
 
-  // ===== IndexedDB (ローカル金庫) 管理用関数 =====
-  // ===== IndexedDB (ローカル金庫) 管理 =====
-  function openDB() {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open("BarcodeAppDB", 1);
-@@ -97,8 +101,7 @@
-    const db = await openDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction("appData", "readwrite");
-      const store = tx.objectStore("appData");
-      store.put(data, key);
-      tx.objectStore("appData").put(data, key);
-      tx.oncomplete = () => resolve();
-    });
-  }
-@@ -107,35 +110,31 @@
-    const db = await openDB();
-    return new Promise((resolve) => {
-      const tx = db.transaction("appData", "readonly");
-      const store = tx.objectStore("appData");
-      const req = store.get(key);
-      const req = tx.objectStore("appData").get(key);
-      req.onsuccess = () => resolve(req.result);
-    });
-  }
-
-  // ===== 起動時処理 =====
-  window.addEventListener('DOMContentLoaded', async () => {
-    // まずローカル金庫から読み出しを試みる
-    const cachedMaster = await getFromDB("itemMasterMap");
-    const cachedDays = await getFromDB("recentDays");
-    const cachedHistory = await getFromDB("historyData");
-
-    if (cachedMaster && cachedDays && cachedHistory) {
-      // 金庫にあったら即座にそれを利用（超爆速起動・通信ゼロ）
-    if (cachedMaster && cachedDays && cachedHistory && Object.keys(cachedMaster).length > 0) {
-      itemMasterMap = cachedMaster;
-      recentDays = cachedDays;
-      historyData = cachedHistory;
-
-      document.getElementById('status').innerText = "⚡️ ローカル金庫から即復元完了！";
-      document.getElementById('status').innerText = "⚡️ ローカル金庫から復元完了！";
-      document.getElementById('start-btn').style.display = 'block';
-    } else {
-      // 金庫になければ最初の一回だけGASからダウンロード
-      fetchDataFromGAS();
-    }
-  });
-
-  function fetchDataFromGAS() {
-    document.getElementById('status').innerText = "☁️ 初回データ取得中（GAS通信）...";
-    document.getElementById('status').innerText = "☁️ マスタダウンロード中 (通信中)...";
+  // 1. 初期起動時処理：商品マスタのみをRAMに読み込む
+  window.addEventListener('DOMContentLoaded', () => {
     fetch(GAS_URL)
       .then(res => res.json())
-      .then(async (data) => {
-@@ -144,7 +143,6 @@
-          recentDays = data.recentDays || [];
-          historyData = data.historyData || {};
-
-          // 金庫に保存する
-          await saveToDB("itemMasterMap", itemMasterMap);
-          await saveToDB("recentDays", recentDays);
-          await saveToDB("historyData", historyData);
-@@ -160,21 +158,23 @@
+      .then(data => {
+        if (data.success && data.itemMasterMap) {
+          itemMasterMap = data.itemMasterMap;
+          document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
+          document.getElementById('start-btn').style.display = 'block';
+        } else {
+          document.getElementById('status').innerText = "❌ マスタ読み込み失敗";
+        }
+      })
+      .catch(err => {
+        document.getElementById('status').innerText = "❌ 通信エラーが発生しました";
       });
-  }
+  });
 
-  // 手動更新ボタンが押された時
-  function forceReloadData() {
-    if (confirm("GASから最新のマスタと実績を再ダウンロードしますか？")) {
-      fetchDataFromGAS();
-    }
-  }
-
-  // ===== カメラ＆スキャン関連 =====
-  // ===== カメラ＆スキャン =====
+  // 2. カメラ起動
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'block';
     document.getElementById('status').innerText = "バーコードにかざしてください";
     
-    isProcessing = false; // ロック解除
+    isProcessing = false;
 
     html5QrCode = new Html5Qrcode("reader");
-    const config = { fps: 10, qrbox: { width: 260, height: 140 } };
-    // カメラの読み取り枠制限(qrbox)を外し、画面全体で認識しやすくしました
-    const config = { fps: 10 };
+    const config = { fps: 10 }; // 全画面認識で高速スキャン
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .catch(err => {
-@@ -183,15 +183,15 @@
+        document.getElementById('status').innerText = "カメラ起動エラー: " + err;
+      });
   }
 
+  // 3. バーコード認識処理
   function onScanSuccess(decodedText) {
-    html5QrCode.pause();
-    // 処理中（画面表示中）なら他のバーコードを無視する（フリーズ防止）
-    if (isProcessing) return; 
+    if (isProcessing) return;
     isProcessing = true;
-
+    
     const rawCode = String(decodedText).trim();
-    // 記号を除去 (例: 4+01085609576 -> 401085609576 -> 4901085609576)
     const digitsOnly = rawCode.replace(/[^0-9]/g, '');
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
 
-    // ローカル金庫から検索
+    // RAM（一時メモリ）から商品マスタを照会
     const found = itemMasterMap[digitsOnly] || itemMasterMap[numOnly] || itemMasterMap[padded13] || itemMasterMap[rawCode];
 
     if (found) {
-@@ -210,8 +210,12 @@
-      document.getElementById('status').innerText = "内容を確認してください";
-      document.getElementById('confirm-box').style.display = "block";
+      document.getElementById('res-code').innerText = found.code;
+      document.getElementById('res-name').innerText = found.name;
+      document.getElementById('res-spec').innerText = found.spec ? `[規格: ${found.spec}]` : "";
+      
+      document.getElementById('status').innerText = "商品情報を取得しました";
+      document.getElementById('result-box').style.display = "block";
+
+      // 該当商品の実績データのみをピンポイント問い合わせ
+      fetchProductHistory(found.code);
     } else {
-      document.getElementById('status').innerText = "未登録コード: " + rawCode + " (抽出: " + digitsOnly + ")";
-      setTimeout(() => { html5QrCode.resume(); }, 2000);
-      document.getElementById('status').innerText = "未登録: " + digitsOnly;
-      // 1.5秒後に再度スキャン可能にする
+      document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
         document.getElementById('status').innerText = "バーコードにかざしてください";
         isProcessing = false; 
@@ -199,50 +137,57 @@
     }
   }
 
-@@ -247,7 +251,6 @@
-    const qty = document.getElementById('res-qty').value;
-    document.getElementById('status').innerText = "実績登録中...";
+  // 4. ピンポイント実績問い合わせ（軽量・爆速）
+  function fetchProductHistory(code) {
+    const historyStatus = document.getElementById('history-status');
+    const historyTable = document.getElementById('history-table');
+    
+    historyStatus.style.display = "block";
+    historyStatus.innerText = "⏳ 直近7日間の実績を照会中...";
+    historyTable.style.display = "none";
 
-    // POST送信でドライブへ書き込み
-    fetch(GAS_URL, {
-      method: "POST",
-      body: JSON.stringify({
-@@ -259,7 +262,6 @@
-    .then(res => res.json())
-    .then(async (data) => {
-      if (data.success) {
-        // ローカル金庫内の今日のリアルタイム実績数も加算更新する
-        const todayStr = recentDays[0]?.dateStr;
-        if (todayStr && historyData[todayStr]) {
-          historyData[todayStr].push({ code: currentItem.code, name: currentItem.name, qty: qty });
-@@ -268,20 +270,28 @@
+    fetch(`${GAS_URL}?code=${encodeURIComponent(code)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.history) {
+          renderHistoryTable(data.history);
+          historyStatus.style.display = "none";
+          historyTable.style.display = "table";
+        } else {
+          historyStatus.innerText = "⚠️ 実績データの取得に失敗しました";
+        }
+      })
+      .catch(err => {
+        historyStatus.innerText = "⚠️ 実績データ通信エラー";
+      });
+  }
 
-        document.getElementById('status').innerText = "✅ 登録完了！";
-        document.getElementById('confirm-box').style.display = "none";
-        document.getElementById('res-qty').value = 1; // 数量リセット
-        
-        setTimeout(() => {
-          document.getElementById('status').innerText = "バーコードにかざしてください";
-          html5QrCode.resume();
-          document.getElementById('status').innerText = "次のバーコードにかざしてください";
-          isProcessing = false; // 再スキャン許可
-        }, 1200);
-      } else {
-        document.getElementById('status').innerText = "保存エラー: " + data.message;
-        isProcessing = false;
-      }
-    })
-    .catch(err => {
-      document.getElementById('status').innerText = "通信エラー";
-      isProcessing = false;
+  // 5. 直近7日間の実績表生成
+  function renderHistoryTable(history) {
+    const headerTr = document.getElementById('history-header');
+    const valuesTr = document.getElementById('history-values');
+    
+    headerTr.innerHTML = "";
+    valuesTr.innerHTML = "";
+
+    history.forEach(item => {
+      const th = document.createElement('th');
+      th.innerText = item.displayDate;
+      headerTr.appendChild(th);
+
+      const td = document.createElement('td');
+      td.innerText = item.qty;
+      valuesTr.appendChild(td);
     });
   }
 
+  // 次のスキャンへ遷移
   function resumeScan() {
-    document.getElementById('confirm-box').style.display = "none";
+    document.getElementById('result-box').style.display = "none";
     document.getElementById('status').innerText = "バーコードにかざしてください";
-    html5QrCode.resume();
-    document.getElementById('res-qty').value = 1;
-    isProcessing = false; // 再スキャン許可
+    isProcessing = false;
   }
 </script>
+
+</body>
+</html>
