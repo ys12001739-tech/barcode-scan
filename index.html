@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>高速バーコード＆実績スキャナー</title>
+  <title>超高速ローカル金庫スキャナー</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
     body { font-family: -apple-system, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; text-align: center; }
@@ -26,20 +26,21 @@
     .btn-main { background: #007bff; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; }
     .btn-save { background: #28a745; color: white; border: none; padding: 10px; font-size: 1em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; }
     .btn-cancel { background: #6c757d; color: white; border: none; padding: 6px; font-size: 0.85em; border-radius: 4px; width: 100%; margin-top: 6px; cursor: pointer; }
+    .btn-reload { background: #f39c12; color: white; border: none; padding: 6px; font-size: 0.75em; border-radius: 4px; margin-top: 15px; cursor: pointer; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>無音スキャナー ＆ 7日間実績照会</h2>
+  <h2>無音スキャナー（金庫キャッシュ版）</h2>
   
-  <div id="status">⚡️ マスタ・実績データ初期ロード中...</div>
+  <div id="status">⚡️ ローカル金庫確認中...</div>
   <div id="reader" style="display:none;"></div>
   
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
   <div id="confirm-box" class="confirm-box">
-    <div class="label">JAN/商品コード</div>
+    <div class="label">JANコード</div>
     <div class="val" id="res-code">-</div>
     
     <div class="label">商品名</div>
@@ -64,10 +65,11 @@
     <button class="btn-save" onclick="saveData()">＋ 実績として登録</button>
     <button class="btn-cancel" onclick="resumeScan()">キャンセルして次をスキャン</button>
   </div>
+
+  <button class="btn-reload" onclick="forceReloadData()">🔄 マスタ＆実績データを最新に更新（再ダウンロード）</button>
 </div>
 
 <script>
-  // ★ご自身のGASのウェブアプリURLを指定してください
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
@@ -76,17 +78,78 @@
   let historyData = {};
   let currentItem = null;
 
-  // 1. 初期一括ロード
-  window.addEventListener('DOMContentLoaded', () => {
+  // ===== IndexedDB (ローカル金庫) 管理用関数 =====
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("BarcodeAppDB", 1);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains("appData")) {
+          db.createObjectStore("appData");
+        }
+      };
+      request.onsuccess = (e) => resolve(e.target.result);
+      request.onerror = (e) => reject(e);
+    });
+  }
+
+  async function saveToDB(key, data) {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction("appData", "readwrite");
+      const store = tx.objectStore("appData");
+      store.put(data, key);
+      tx.oncomplete = () => resolve();
+    });
+  }
+
+  async function getFromDB(key) {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction("appData", "readonly");
+      const store = tx.objectStore("appData");
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result);
+    });
+  }
+
+  // ===== 起動時処理 =====
+  window.addEventListener('DOMContentLoaded', async () => {
+    // まずローカル金庫から読み出しを試みる
+    const cachedMaster = await getFromDB("itemMasterMap");
+    const cachedDays = await getFromDB("recentDays");
+    const cachedHistory = await getFromDB("historyData");
+
+    if (cachedMaster && cachedDays && cachedHistory) {
+      // 金庫にあったら即座にそれを利用（超爆速起動・通信ゼロ）
+      itemMasterMap = cachedMaster;
+      recentDays = cachedDays;
+      historyData = cachedHistory;
+      
+      document.getElementById('status').innerText = "⚡️ ローカル金庫から即復元完了！";
+      document.getElementById('start-btn').style.display = 'block';
+    } else {
+      // 金庫になければ最初の一回だけGASからダウンロード
+      fetchDataFromGAS();
+    }
+  });
+
+  function fetchDataFromGAS() {
+    document.getElementById('status').innerText = "☁️ 初回データ取得中（GAS通信）...";
     fetch(GAS_URL)
       .then(res => res.json())
-      .then(data => {
+      .then(async (data) => {
         if (data.success) {
           itemMasterMap = data.itemMasterMap || {};
           recentDays = data.recentDays || [];
           historyData = data.historyData || {};
           
-          document.getElementById('status').innerText = "✅ 展開完了！カメラを起動してください";
+          // 金庫に保存する
+          await saveToDB("itemMasterMap", itemMasterMap);
+          await saveToDB("recentDays", recentDays);
+          await saveToDB("historyData", historyData);
+
+          document.getElementById('status').innerText = "✅ 金庫に保存完了！カメラを起動してください";
           document.getElementById('start-btn').style.display = 'block';
         } else {
           document.getElementById('status').innerText = "データロード失敗";
@@ -95,9 +158,16 @@
       .catch(err => {
         document.getElementById('status').innerText = "通信エラーが発生しました";
       });
-  });
+  }
 
-  // 2. カメラ起動
+  // 手動更新ボタンが押された時
+  function forceReloadData() {
+    if (confirm("GASから最新のマスタと実績を再ダウンロードしますか？")) {
+      fetchDataFromGAS();
+    }
+  }
+
+  // ===== カメラ＆スキャン関連 =====
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'block';
@@ -112,19 +182,21 @@
       });
   }
 
-  // 3. 超高速ヒット検索（O(1)照会）
   function onScanSuccess(decodedText) {
     html5QrCode.pause();
     
-    const cleanCode = String(decodedText).trim();
-    const numCode = String(Number(cleanCode));
-    
-    // 13桁完全一致または頭ゼロを除去した数値一致でマスタ照会
-    const found = itemMasterMap[cleanCode] || itemMasterMap[numCode];
+    const rawCode = String(decodedText).trim();
+    // 記号を除去 (例: 4+01085609576 -> 401085609576 -> 4901085609576)
+    const digitsOnly = rawCode.replace(/[^0-9]/g, '');
+    const numOnly = String(Number(digitsOnly || '0'));
+    const padded13 = digitsOnly.padStart(13, '0');
+
+    // ローカル金庫から検索
+    const found = itemMasterMap[digitsOnly] || itemMasterMap[numOnly] || itemMasterMap[padded13] || itemMasterMap[rawCode];
 
     if (found) {
       currentItem = {
-        code: cleanCode,
+        code: digitsOnly || rawCode,
         name: found.name,
         spec: found.spec
       };
@@ -133,18 +205,17 @@
       document.getElementById('res-name').innerText = currentItem.name;
       document.getElementById('res-spec').innerText = currentItem.spec ? `[規格: ${currentItem.spec}]` : "";
       
-      renderHistoryTable(cleanCode, numCode);
+      renderHistoryTable(digitsOnly, numOnly, padded13);
 
       document.getElementById('status').innerText = "内容を確認してください";
       document.getElementById('confirm-box').style.display = "block";
     } else {
-      document.getElementById('status').innerText = "未登録コード: " + cleanCode;
+      document.getElementById('status').innerText = "未登録コード: " + rawCode + " (抽出: " + digitsOnly + ")";
       setTimeout(() => { html5QrCode.resume(); }, 2000);
     }
   }
 
-  // 4. 直近7日間の実績テーブル生成
-  function renderHistoryTable(code, numCode) {
+  function renderHistoryTable(code1, code2, code3) {
     const headerTr = document.getElementById('history-header');
     const valuesTr = document.getElementById('history-values');
     
@@ -160,7 +231,7 @@
       const totalQty = dayRecords
         .filter(r => {
           const rCode = String(r.code).trim();
-          return rCode === code || rCode === numCode;
+          return rCode === code1 || rCode === code2 || rCode === code3;
         })
         .reduce((sum, r) => sum + Number(r.qty || 1), 0);
 
@@ -170,12 +241,13 @@
     });
   }
 
-  // 5. 今日の実績ファイル（ITEM_YYYY-MM-DD.json）へ保存
+  // 実績保存
   function saveData() {
     if (!currentItem) return;
     const qty = document.getElementById('res-qty').value;
     document.getElementById('status').innerText = "実績登録中...";
 
+    // POST送信でドライブへ書き込み
     fetch(GAS_URL, {
       method: "POST",
       body: JSON.stringify({
@@ -185,8 +257,15 @@
       })
     })
     .then(res => res.json())
-    .then(data => {
+    .then(async (data) => {
       if (data.success) {
+        // ローカル金庫内の今日のリアルタイム実績数も加算更新する
+        const todayStr = recentDays[0]?.dateStr;
+        if (todayStr && historyData[todayStr]) {
+          historyData[todayStr].push({ code: currentItem.code, name: currentItem.name, qty: qty });
+          await saveToDB("historyData", historyData);
+        }
+
         document.getElementById('status').innerText = "✅ 登録完了！";
         document.getElementById('confirm-box').style.display = "none";
         setTimeout(() => {
