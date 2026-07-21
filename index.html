@@ -49,7 +49,7 @@
     <div class="label">規格</div>
     <div class="spec" id="res-spec">-</div>
 
-    <div class="label">📊 直近7日間の日別販売実績（日付・曜日）</div>
+    <div class="label">📊 直近7日間の日別販売実績</div>
     <table class="history-table">
       <thead>
         <tr id="history-header"></tr>
@@ -66,10 +66,11 @@
     <button class="btn-cancel" onclick="resumeScan()">キャンセルして次をスキャン</button>
   </div>
 
-  <button class="btn-reload" onclick="forceReloadData()">🔄 マスタ＆実績データを最新に更新（再ダウンロード）</button>
+  <button class="btn-reload" onclick="forceReloadData()">🔄 マスタ＆実績データを最新に更新</button>
 </div>
 
 <script>
+  // ★GASのURLを貼り付けてください！
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
@@ -77,8 +78,11 @@
   let recentDays = [];
   let historyData = {};
   let currentItem = null;
+  
+  // 💡 フリーズ防止用の処理ロックフラグ
+  let isProcessing = false; 
 
-  // ===== IndexedDB (ローカル金庫) 管理用関数 =====
+  // ===== IndexedDB (ローカル金庫) 管理 =====
   function openDB() {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open("BarcodeAppDB", 1);
@@ -97,8 +101,7 @@
     const db = await openDB();
     return new Promise((resolve) => {
       const tx = db.transaction("appData", "readwrite");
-      const store = tx.objectStore("appData");
-      store.put(data, key);
+      tx.objectStore("appData").put(data, key);
       tx.oncomplete = () => resolve();
     });
   }
@@ -107,35 +110,31 @@
     const db = await openDB();
     return new Promise((resolve) => {
       const tx = db.transaction("appData", "readonly");
-      const store = tx.objectStore("appData");
-      const req = store.get(key);
+      const req = tx.objectStore("appData").get(key);
       req.onsuccess = () => resolve(req.result);
     });
   }
 
   // ===== 起動時処理 =====
   window.addEventListener('DOMContentLoaded', async () => {
-    // まずローカル金庫から読み出しを試みる
     const cachedMaster = await getFromDB("itemMasterMap");
     const cachedDays = await getFromDB("recentDays");
     const cachedHistory = await getFromDB("historyData");
 
-    if (cachedMaster && cachedDays && cachedHistory) {
-      // 金庫にあったら即座にそれを利用（超爆速起動・通信ゼロ）
+    if (cachedMaster && cachedDays && cachedHistory && Object.keys(cachedMaster).length > 0) {
       itemMasterMap = cachedMaster;
       recentDays = cachedDays;
       historyData = cachedHistory;
       
-      document.getElementById('status').innerText = "⚡️ ローカル金庫から即復元完了！";
+      document.getElementById('status').innerText = "⚡️ ローカル金庫から復元完了！";
       document.getElementById('start-btn').style.display = 'block';
     } else {
-      // 金庫になければ最初の一回だけGASからダウンロード
       fetchDataFromGAS();
     }
   });
 
   function fetchDataFromGAS() {
-    document.getElementById('status').innerText = "☁️ 初回データ取得中（GAS通信）...";
+    document.getElementById('status').innerText = "☁️ マスタダウンロード中 (通信中)...";
     fetch(GAS_URL)
       .then(res => res.json())
       .then(async (data) => {
@@ -144,7 +143,6 @@
           recentDays = data.recentDays || [];
           historyData = data.historyData || {};
           
-          // 金庫に保存する
           await saveToDB("itemMasterMap", itemMasterMap);
           await saveToDB("recentDays", recentDays);
           await saveToDB("historyData", historyData);
@@ -160,21 +158,23 @@
       });
   }
 
-  // 手動更新ボタンが押された時
   function forceReloadData() {
     if (confirm("GASから最新のマスタと実績を再ダウンロードしますか？")) {
       fetchDataFromGAS();
     }
   }
 
-  // ===== カメラ＆スキャン関連 =====
+  // ===== カメラ＆スキャン =====
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'block';
     document.getElementById('status').innerText = "バーコードにかざしてください";
+    
+    isProcessing = false; // ロック解除
 
     html5QrCode = new Html5Qrcode("reader");
-    const config = { fps: 10, qrbox: { width: 260, height: 140 } };
+    // カメラの読み取り枠制限(qrbox)を外し、画面全体で認識しやすくしました
+    const config = { fps: 10 };
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .catch(err => {
@@ -183,15 +183,15 @@
   }
 
   function onScanSuccess(decodedText) {
-    html5QrCode.pause();
+    // 処理中（画面表示中）なら他のバーコードを無視する（フリーズ防止）
+    if (isProcessing) return; 
+    isProcessing = true;
     
     const rawCode = String(decodedText).trim();
-    // 記号を除去 (例: 4+01085609576 -> 401085609576 -> 4901085609576)
     const digitsOnly = rawCode.replace(/[^0-9]/g, '');
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
 
-    // ローカル金庫から検索
     const found = itemMasterMap[digitsOnly] || itemMasterMap[numOnly] || itemMasterMap[padded13] || itemMasterMap[rawCode];
 
     if (found) {
@@ -210,8 +210,12 @@
       document.getElementById('status').innerText = "内容を確認してください";
       document.getElementById('confirm-box').style.display = "block";
     } else {
-      document.getElementById('status').innerText = "未登録コード: " + rawCode + " (抽出: " + digitsOnly + ")";
-      setTimeout(() => { html5QrCode.resume(); }, 2000);
+      document.getElementById('status').innerText = "未登録: " + digitsOnly;
+      // 1.5秒後に再度スキャン可能にする
+      setTimeout(() => { 
+        document.getElementById('status').innerText = "バーコードにかざしてください";
+        isProcessing = false; 
+      }, 1500);
     }
   }
 
@@ -247,7 +251,6 @@
     const qty = document.getElementById('res-qty').value;
     document.getElementById('status').innerText = "実績登録中...";
 
-    // POST送信でドライブへ書き込み
     fetch(GAS_URL, {
       method: "POST",
       body: JSON.stringify({
@@ -259,7 +262,6 @@
     .then(res => res.json())
     .then(async (data) => {
       if (data.success) {
-        // ローカル金庫内の今日のリアルタイム実績数も加算更新する
         const todayStr = recentDays[0]?.dateStr;
         if (todayStr && historyData[todayStr]) {
           historyData[todayStr].push({ code: currentItem.code, name: currentItem.name, qty: qty });
@@ -268,20 +270,28 @@
 
         document.getElementById('status').innerText = "✅ 登録完了！";
         document.getElementById('confirm-box').style.display = "none";
+        document.getElementById('res-qty').value = 1; // 数量リセット
+        
         setTimeout(() => {
-          document.getElementById('status').innerText = "バーコードにかざしてください";
-          html5QrCode.resume();
+          document.getElementById('status').innerText = "次のバーコードにかざしてください";
+          isProcessing = false; // 再スキャン許可
         }, 1200);
       } else {
         document.getElementById('status').innerText = "保存エラー: " + data.message;
+        isProcessing = false;
       }
+    })
+    .catch(err => {
+      document.getElementById('status').innerText = "通信エラー";
+      isProcessing = false;
     });
   }
 
   function resumeScan() {
     document.getElementById('confirm-box').style.display = "none";
     document.getElementById('status').innerText = "バーコードにかざしてください";
-    html5QrCode.resume();
+    document.getElementById('res-qty').value = 1;
+    isProcessing = false; // 再スキャン許可
   }
 </script>
 
