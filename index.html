@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商品無音スキャナー</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; padding: 15px; background: #f4f6f8; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
+    h2 { font-size: 1.2em; color: #333; margin-top: 0; }
+    #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 15px; background: #000; }
+    .result-box { text-align: left; background: #eef2f5; padding: 15px; border-radius: 8px; margin-top: 15px; display: none; }
+    .label { font-size: 0.8em; color: #666; margin-top: 5px; }
+    .val { font-size: 1.1em; font-weight: bold; color: #333; }
+    .price { font-size: 1.4em; font-weight: bold; color: #e63946; }
+    #status { font-weight: bold; margin: 10px 0; color: #007bff; font-size: 0.95em; }
+    button { background: #007bff; color: white; border: none; padding: 14px 20px; font-size: 1em; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>無音商品スキャナー</h2>
+  <div id="reader"></div>
+  
+  <button id="start-btn" onclick="startScan()">📷 カメラを起動する</button>
+  <div id="status">ボタンを押すとスキャンを開始します</div>
+
+  <div id="result-box" class="result-box">
+    <div class="label">商品コード</div>
+    <div class="val" id="res-code">-</div>
+    <div class="label">商品名</div>
+    <div class="val" id="res-name">-</div>
+    <div class="label">価格</div>
+    <div class="price" id="res-price">-</div>
+  </div>
+</div>
+
+<script>
+  // ★ここにステップ1で取得したウェブアプリURLを貼り付けます★
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
+  
+  let html5QrCode;
+  let isScanning = false;
+
+  function startScan() {
+    if (isScanning) return;
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('status').innerText = "バーコードにかざしてください";
+
+    html5QrCode = new Html5Qrcode("reader");
+    // バーコード（JANコード）が読み取りやすい横長の枠に設定
+    const config = { fps: 10, qrbox: { width: 260, height: 140 } };
+
+    html5QrCode.start(
+      { facingMode: "environment" }, 
+      config, 
+      onScanSuccess
+    ).catch(err => {
+      document.getElementById('status').innerText = "カメラの起動に失敗しました。アクセスを許可してください。";
+      document.getElementById('start-btn').style.display = 'block';
+    });
+
+    isScanning = true;
+  }
+
+  function onScanSuccess(decodedText) {
+    // 連投防止のため一瞬スキャンをポーズ
+    html5QrCode.pause();
+    document.getElementById('status').innerText = "マスタを検索中: " + decodedText;
+
+    // GASに商品情報を問い合わせ
+    fetch(`${GAS_URL}?code=${encodeURIComponent(decodedText)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          document.getElementById('status').innerText = "読み取り成功！";
+          document.getElementById('res-code').innerText = data.code;
+          document.getElementById('res-name').innerText = data.name;
+          document.getElementById('res-price').innerText = Number(data.price).toLocaleString() + " 円";
+          document.getElementById('result-box').style.display = "block";
+        } else {
+          document.getElementById('status').innerText = data.message;
+        }
+        
+        // 2秒後に自動で次のスキャン待機状態に戻る（連続スキャン可能）
+        setTimeout(() => {
+          document.getElementById('status').innerText = "バーコードにかざしてください";
+          html5QrCode.resume();
+        }, 2000);
+      })
+      .catch(err => {
+        document.getElementById('status').innerText = "通信エラーが発生しました";
+        setTimeout(() => html5QrCode.resume(), 2000);
+      });
+  }
+</script>
+
+</body>
+</html>
