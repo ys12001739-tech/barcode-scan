@@ -11,15 +11,13 @@
     h2 { font-size: 1.1em; color: #333; margin-top: 0; }
     #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 12px; background: #000; }
     
-    /* 読み取り完了後の詳細表示 */
     .confirm-box { text-align: left; background: #eef2f5; padding: 12px; border-radius: 8px; margin-top: 12px; display: none; }
     .label { font-size: 0.75em; color: #666; margin-top: 6px; }
     .val { font-size: 1em; font-weight: bold; color: #333; }
-    .price { font-size: 1.2em; font-weight: bold; color: #e63946; }
+    .spec { font-size: 0.85em; color: #007bff; font-weight: bold; }
     
-    /* 直近7日間の実績テーブル */
-    .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.85em; }
-    .history-table th, .history-table td { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
+    .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8em; }
+    .history-table th, .history-table td { border: 1px solid #ccc; padding: 4px 2px; text-align: center; }
     .history-table th { background: #e0e6ed; }
 
     input[type="number"] { width: 70px; padding: 6px; font-size: 1em; border-radius: 4px; border: 1px solid #ccc; }
@@ -40,19 +38,17 @@
   
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
-  <!-- 照会＆登録フォーム -->
   <div id="confirm-box" class="confirm-box">
-    <div class="label">商品コード</div>
+    <div class="label">JAN/商品コード</div>
     <div class="val" id="res-code">-</div>
     
     <div class="label">商品名</div>
     <div class="val" id="res-name">-</div>
     
-    <div class="label">単価</div>
-    <div class="price" id="res-price">-</div>
+    <div class="label">規格</div>
+    <div class="spec" id="res-spec">-</div>
 
-    <!-- 直近7日間の日別実績表示エリア -->
-    <div class="label">📊 直近7日間の日別販売数（日付・曜日）</div>
+    <div class="label">📊 直近7日間の日別販売実績（日付・曜日）</div>
     <table class="history-table">
       <thead>
         <tr id="history-header"></tr>
@@ -71,22 +67,22 @@
 </div>
 
 <script>
-  // ★GASのウェブアプリURLを貼り付けます
+  // ★ご自身のGASのウェブアプリURLを指定してください
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
-  let itemMaster = [];
+  let itemMasterMap = {};
   let recentDays = [];
   let historyData = {};
   let currentItem = null;
 
-  // 1. ページロード時に一括高速読み込み
+  // 1. 初期一括ロード
   window.addEventListener('DOMContentLoaded', () => {
     fetch(GAS_URL)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
-          itemMaster = data.itemMaster || [];
+          itemMasterMap = data.itemMasterMap || {};
           recentDays = data.recentDays || [];
           historyData = data.historyData || {};
           
@@ -116,40 +112,39 @@
       });
   }
 
-  // 3. バーコード認識（メモリ内から爆速照会）
+  // 3. 超高速ヒット検索（O(1)照会）
   function onScanSuccess(decodedText) {
     html5QrCode.pause();
     
-    // メモリ上の商品マスタから検索 (code / jan / id などのキーに対応)
-    const found = itemMaster.find(item => 
-      String(item.code || item.JAN || item.id).trim() === String(decodedText).trim()
-    );
+    const cleanCode = String(decodedText).trim();
+    const numCode = String(Number(cleanCode));
+    
+    // 13桁完全一致または頭ゼロを除去した数値一致でマスタ照会
+    const found = itemMasterMap[cleanCode] || itemMasterMap[numCode];
 
     if (found) {
       currentItem = {
-        code: decodedText,
-        name: found.name || found.商品名 || "名称未設定",
-        price: found.price || found.単価 || 0
+        code: cleanCode,
+        name: found.name,
+        spec: found.spec
       };
       
-      // 画面出力
       document.getElementById('res-code').innerText = currentItem.code;
       document.getElementById('res-name').innerText = currentItem.name;
-      document.getElementById('res-price').innerText = Number(currentItem.price).toLocaleString() + " 円";
+      document.getElementById('res-spec').innerText = currentItem.spec ? `[規格: ${currentItem.spec}]` : "";
       
-      // 直近7日間の実績を集計して表にセット
-      renderHistoryTable(decodedText);
+      renderHistoryTable(cleanCode, numCode);
 
       document.getElementById('status').innerText = "内容を確認してください";
       document.getElementById('confirm-box').style.display = "block";
     } else {
-      document.getElementById('status').innerText = "未登録コード: " + decodedText;
+      document.getElementById('status').innerText = "未登録コード: " + cleanCode;
       setTimeout(() => { html5QrCode.resume(); }, 2000);
     }
   }
 
   // 4. 直近7日間の実績テーブル生成
-  function renderHistoryTable(code) {
+  function renderHistoryTable(code, numCode) {
     const headerTr = document.getElementById('history-header');
     const valuesTr = document.getElementById('history-values');
     
@@ -157,15 +152,16 @@
     valuesTr.innerHTML = "";
 
     recentDays.forEach(day => {
-      // ヘッダー（日付と曜日）
       const th = document.createElement('th');
-      th.innerText = day.displayDate; // 例: 07/07(火)
+      th.innerText = day.displayDate;
       headerTr.appendChild(th);
 
-      // 実績集計
       const dayRecords = historyData[day.dateStr] || [];
       const totalQty = dayRecords
-        .filter(r => String(r.code).trim() === String(code).trim())
+        .filter(r => {
+          const rCode = String(r.code).trim();
+          return rCode === code || rCode === numCode;
+        })
         .reduce((sum, r) => sum + Number(r.qty || 1), 0);
 
       const td = document.createElement('td');
@@ -174,7 +170,7 @@
     });
   }
 
-  // 5. 登録（今日のJSONへ追加更新）
+  // 5. 今日の実績ファイル（ITEM_YYYY-MM-DD.json）へ保存
   function saveData() {
     if (!currentItem) return;
     const qty = document.getElementById('res-qty').value;
@@ -185,7 +181,6 @@
       body: JSON.stringify({
         code: currentItem.code,
         name: currentItem.name,
-        price: currentItem.price,
         qty: qty
       })
     })
