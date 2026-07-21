@@ -7,49 +7,46 @@
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 8px; background: #f1f5f9; text-align: center; color: #1e293b; }
-    .card { background: white; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 100%; width: 100%; margin: 0 auto; overflow: hidden; }
-    h2 { font-size: 1em; color: #0f172a; margin: 0 0 8px 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 8px; background: #f1f5f9; text-align: center; color: #1e293b; overflow-x: hidden; }
+    .card { background: white; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); width: 100%; max-width: 500px; margin: 0 auto; overflow: hidden; }
+    h2 { font-size: 1.05em; color: #0f172a; margin: 0 0 10px 0; }
     
-    /* 💡 スキャン中のカメラ画面枠（見やすく大きめに拡大） */
+    /* 💡 カメラ映像エリアのサイズ調整 */
     #reader { 
       width: 100%; 
-      max-height: 260px; 
+      max-height: 220px; 
       border-radius: 8px; 
       overflow: hidden; 
-      margin-bottom: 8px; 
+      margin-bottom: 10px; 
       background: #000; 
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    #reader video {
-      object-fit: cover !important;
-      height: 260px !important;
-    }
+    #reader video { object-fit: cover !important; height: 220px !important; }
     
-    .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
+    .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; width: 100%; }
     
-    /* 詳細情報テーブル */
-    .detail-grid { width: 100%; border-collapse: collapse; font-size: 0.8em; margin-bottom: 8px; }
-    .detail-grid th { background: #e2e8f0; color: #334155; text-align: left; padding: 4px 6px; width: 32%; border: 1px solid #cbd5e1; white-space: nowrap; }
-    .detail-grid td { background: #fff; color: #0f172a; padding: 4px 6px; border: 1px solid #cbd5e1; font-weight: bold; word-break: break-all; }
+    /* 詳細情報テーブル（画面はみ出し防止） */
+    .detail-grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8em; margin-bottom: 10px; }
+    .detail-grid th { background: #e2e8f0; color: #334155; text-align: left; padding: 6px; width: 35%; border: 1px solid #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .detail-grid td { background: #fff; color: #0f172a; padding: 6px; border: 1px solid #cbd5e1; font-weight: bold; word-wrap: break-word; overflow-wrap: break-word; }
     .val-highlight { color: #2563eb; font-size: 1.05em; }
 
-    /* 実績テーブル横スクロール対応 */
-    .table-container { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 4px; }
-    .history-table { width: 100%; min-width: 380px; border-collapse: collapse; font-size: 0.75em; }
-    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 5px 2px; text-align: center; white-space: nowrap; }
+    /* 実績テーブル（横スクロール対応） */
+    .table-container { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
+    .history-table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: 0.75em; }
+    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 6px 4px; text-align: center; white-space: nowrap; }
     .history-table th { background: #f1f5f9; color: #475569; font-weight: bold; }
     .history-table td { background: #fff; }
-    .row-title { background: #f8fafc !important; font-weight: bold; color: #475569; text-align: left !important; padding-left: 6px !important; }
+    .row-title { background: #f8fafc !important; font-weight: bold; color: #475569; text-align: left !important; padding-left: 6px !important; position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; }
     .qty-val { color: #0f172a; font-weight: bold; }
     .sales-val { color: #059669; font-weight: bold; }
 
-    #status { font-weight: bold; margin: 4px 0; color: #2563eb; font-size: 0.85em; min-height: 1.2em; }
-    .btn-main { background: #2563eb; color: white; border: none; padding: 10px; font-size: 0.95em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; }
-    .btn-next { background: #475569; color: white; border: none; padding: 10px; font-size: 0.9em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; }
-    .loading-spinner { font-size: 0.78em; color: #d97706; font-weight: bold; }
+    #status { font-weight: bold; margin: 6px 0; color: #2563eb; font-size: 0.85em; min-height: 1.2em; }
+    .btn-main { background: #2563eb; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
+    .btn-next { background: #475569; color: white; border: none; padding: 10px; font-size: 0.9em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 12px; }
+    .loading-spinner { font-size: 0.8em; color: #d97706; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -65,57 +62,26 @@
   <div id="result-box" class="result-box">
     <!-- 商品詳細一覧 -->
     <table class="detail-grid">
-      <tr>
-        <th>JANコード</th>
-        <td id="res-code" class="val-highlight">-</td>
-      </tr>
-      <tr>
-        <th>商品名</th>
-        <td id="res-name">-</td>
-      </tr>
-      <tr>
-        <th>メーカー名</th>
-        <td id="res-maker">-</td>
-      </tr>
-      <tr>
-        <th>規格</th>
-        <td id="res-spec">-</td>
-      </tr>
-      <tr>
-        <th>部門グループ</th>
-        <td id="res-dept">-</td>
-      </tr>
-      <tr>
-        <th>系</th>
-        <td id="res-kei">-</td>
-      </tr>
-      <tr>
-        <th>大分類</th>
-        <td id="res-dai">-</td>
-      </tr>
-      <tr>
-        <th>ライン</th>
-        <td id="res-line">-</td>
-      </tr>
-      <tr>
-        <th>クラス</th>
-        <td id="res-cls">-</td>
-      </tr>
-      <tr>
-        <th>メーカーコード</th>
-        <td id="res-makercode">-</td>
-      </tr>
+      <tr><th>JANコード</th><td id="res-code" class="val-highlight">-</td></tr>
+      <tr><th>商品名</th><td id="res-name">-</td></tr>
+      <tr><th>メーカー名</th><td id="res-maker">-</td></tr>
+      <tr><th>規格</th><td id="res-spec">-</td></tr>
+      <tr><th>部門グループ</th><td id="res-dept">-</td></tr>
+      <tr><th>系</th><td id="res-kei">-</td></tr>
+      <tr><th>大分類</th><td id="res-dai">-</td></tr>
+      <tr><th>ライン</th><td id="res-line">-</td></tr>
+      <tr><th>クラス</th><td id="res-cls">-</td></tr>
+      <tr><th>メーカーコード</th><td id="res-makercode">-</td></tr>
+      <tr><th>原価 / 売価</th><td id="res-price">-</td></tr>
     </table>
 
     <!-- 直近7日間の実績 -->
-    <div style="font-size:0.8em; font-weight:bold; color:#475569; margin-top:6px;">📊 直近7日間の日別販売実績</div>
+    <div style="font-size:0.85em; font-weight:bold; color:#475569; margin-top:10px;">📊 直近7日間の全社日別販売実績</div>
     <div id="history-status" class="loading-spinner">実績データを照会中...</div>
     
     <div class="table-container" id="table-container" style="display:none;">
       <table class="history-table">
-        <thead>
-          <tr id="history-header"></tr>
-        </thead>
+        <thead><tr id="history-header"></tr></thead>
         <tbody>
           <tr id="history-qty-row"></tr>
           <tr id="history-sales-row"></tr>
@@ -128,6 +94,7 @@
 </div>
 
 <script>
+  // ★GASのURLに書き換えてください
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
@@ -182,7 +149,7 @@
     const found = itemMasterMap[digitsOnly] || itemMasterMap[numOnly] || itemMasterMap[padded13] || itemMasterMap[rawCode];
 
     if (found) {
-      // スキャン成功時はカメラ枠を閉じて詳細画面を大きく表示
+      // カメラ非表示で全画面活用
       document.getElementById('reader').style.display = 'none';
 
       document.getElementById('res-code').innerText = found.code;
@@ -195,6 +162,10 @@
       document.getElementById('res-line').innerText = found.line;
       document.getElementById('res-cls').innerText = found.cls;
       document.getElementById('res-makercode').innerText = found.makerCode;
+      
+      const costStr = found.cost ? `¥${Number(found.cost).toLocaleString()}` : "未設定";
+      const priceStr = found.price ? `¥${Number(found.price).toLocaleString()}` : "未設定";
+      document.getElementById('res-price').innerText = `${costStr} / ${priceStr}`;
 
       document.getElementById('status').innerText = "商品情報を取得しました";
       document.getElementById('result-box').style.display = "block";
@@ -238,9 +209,10 @@
     const qtyTr = document.getElementById('history-qty-row');
     const salesTr = document.getElementById('history-sales-row');
     
-    headerTr.innerHTML = "<th>項目</th>";
-    qtyTr.innerHTML = "<td class='row-title'>数量</td>";
-    salesTr.innerHTML = "<td class='row-title'>売上</td>";
+    // 見出しの横スクロール固定処理
+    headerTr.innerHTML = "<th style='position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1;'>日付</th>";
+    qtyTr.innerHTML = "<td class='row-title'>数量(点)</td>";
+    salesTr.innerHTML = "<td class='row-title'>売上(円)</td>";
 
     history.forEach(item => {
       const th = document.createElement('th');
