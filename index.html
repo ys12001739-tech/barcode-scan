@@ -11,10 +11,10 @@
     .card { background: white; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 100%; width: 100%; margin: 0 auto; overflow: hidden; }
     h2 { font-size: 1em; color: #0f172a; margin: 0 0 8px 0; }
     
-    /* 💡 カメラ映像エリアの高さを約半分に制限（アスペクト比固定＆はみ出しカット） */
+    /* 💡 スキャン中のカメラ画面枠（見やすく大きめに拡大） */
     #reader { 
       width: 100%; 
-      max-height: 170px; 
+      max-height: 260px; 
       border-radius: 8px; 
       overflow: hidden; 
       margin-bottom: 8px; 
@@ -25,24 +25,24 @@
     }
     #reader video {
       object-fit: cover !important;
-      height: 170px !important;
+      height: 260px !important;
     }
     
     .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
     
     /* 詳細情報テーブル */
     .detail-grid { width: 100%; border-collapse: collapse; font-size: 0.8em; margin-bottom: 8px; }
-    .detail-grid th { background: #e2e8f0; color: #334155; text-align: left; padding: 4px 6px; width: 30%; border: 1px solid #cbd5e1; white-space: nowrap; }
+    .detail-grid th { background: #e2e8f0; color: #334155; text-align: left; padding: 4px 6px; width: 32%; border: 1px solid #cbd5e1; white-space: nowrap; }
     .detail-grid td { background: #fff; color: #0f172a; padding: 4px 6px; border: 1px solid #cbd5e1; font-weight: bold; word-break: break-all; }
     .val-highlight { color: #2563eb; font-size: 1.05em; }
 
     /* 実績テーブル横スクロール対応 */
     .table-container { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 4px; }
     .history-table { width: 100%; min-width: 380px; border-collapse: collapse; font-size: 0.75em; }
-    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: center; white-space: nowrap; }
+    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 5px 2px; text-align: center; white-space: nowrap; }
     .history-table th { background: #f1f5f9; color: #475569; font-weight: bold; }
     .history-table td { background: #fff; }
-    .row-title { background: #f8fafc !important; font-weight: bold; color: #475569; text-align: left !important; padding-left: 4px !important; }
+    .row-title { background: #f8fafc !important; font-weight: bold; color: #475569; text-align: left !important; padding-left: 6px !important; }
     .qty-val { color: #0f172a; font-weight: bold; }
     .sales-val { color: #059669; font-weight: bold; }
 
@@ -82,12 +82,28 @@
         <td id="res-spec">-</td>
       </tr>
       <tr>
-        <th>原価 / 売価</th>
-        <td id="res-price">-</td>
+        <th>部門グループ</th>
+        <td id="res-dept">-</td>
       </tr>
       <tr>
-        <th>取引先コード</th>
-        <td id="res-supplier">-</td>
+        <th>系</th>
+        <td id="res-kei">-</td>
+      </tr>
+      <tr>
+        <th>大分類</th>
+        <td id="res-dai">-</td>
+      </tr>
+      <tr>
+        <th>ライン</th>
+        <td id="res-line">-</td>
+      </tr>
+      <tr>
+        <th>クラス</th>
+        <td id="res-cls">-</td>
+      </tr>
+      <tr>
+        <th>メーカーコード</th>
+        <td id="res-makercode">-</td>
       </tr>
     </table>
 
@@ -166,19 +182,19 @@
     const found = itemMasterMap[digitsOnly] || itemMasterMap[numOnly] || itemMasterMap[padded13] || itemMasterMap[rawCode];
 
     if (found) {
-      // 💡 スキャン成功時はカメラエリアを一旦隠して画面を広く使う
+      // スキャン成功時はカメラ枠を閉じて詳細画面を大きく表示
       document.getElementById('reader').style.display = 'none';
 
       document.getElementById('res-code').innerText = found.code;
       document.getElementById('res-name').innerText = found.name;
       document.getElementById('res-maker').innerText = found.makerName;
       document.getElementById('res-spec').innerText = found.spec;
-      
-      const costStr = found.cost ? `¥${Number(found.cost).toLocaleString()}` : "-";
-      const priceStr = found.price ? `¥${Number(found.price).toLocaleString()}` : "-";
-      document.getElementById('res-price').innerText = `${costStr} / ${priceStr}`;
-      
-      document.getElementById('res-supplier').innerText = found.supplierCode;
+      document.getElementById('res-dept').innerText = found.deptGroup;
+      document.getElementById('res-kei').innerText = found.kei;
+      document.getElementById('res-dai').innerText = found.dai;
+      document.getElementById('res-line').innerText = found.line;
+      document.getElementById('res-cls').innerText = found.cls;
+      document.getElementById('res-makercode').innerText = found.makerCode;
 
       document.getElementById('status').innerText = "商品情報を取得しました";
       document.getElementById('result-box').style.display = "block";
@@ -245,7 +261,7 @@
 
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
-    document.getElementById('reader').style.display = 'flex'; // カメラ枠を再表示
+    document.getElementById('reader').style.display = 'flex';
     document.getElementById('status').innerText = "バーコードにかざしてください";
     isProcessing = false;
   }
