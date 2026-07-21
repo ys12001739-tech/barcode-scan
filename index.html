@@ -2,35 +2,60 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>商品マスタ＆実績参照照会システム</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>商品詳細＆実績照会システム</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; text-align: center; color: #333; }
-    .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 420px; margin: 0 auto; }
-    h2 { font-size: 1.1em; color: #1e293b; margin-top: 0; margin-bottom: 12px; }
-    #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 12px; background: #000; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 8px; background: #f1f5f9; text-align: center; color: #1e293b; }
+    .card { background: white; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 100%; width: 100%; margin: 0 auto; overflow: hidden; }
+    h2 { font-size: 1em; color: #0f172a; margin: 0 0 8px 0; }
     
-    .result-box { text-align: left; background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-top: 12px; display: none; }
-    .label { font-size: 0.75em; color: #64748b; margin-top: 6px; font-weight: bold; }
-    .val { font-size: 1.05em; font-weight: bold; color: #0f172a; word-break: break-all; }
-    .spec { font-size: 0.85em; color: #2563eb; font-weight: bold; }
+    /* 💡 カメラ映像エリアの高さを約半分に制限（アスペクト比固定＆はみ出しカット） */
+    #reader { 
+      width: 100%; 
+      max-height: 170px; 
+      border-radius: 8px; 
+      overflow: hidden; 
+      margin-bottom: 8px; 
+      background: #000; 
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #reader video {
+      object-fit: cover !important;
+      height: 170px !important;
+    }
     
-    .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.8em; }
-    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 6px 2px; text-align: center; }
-    .history-table th { background: #f1f5f9; color: #475569; }
-    .history-table td { font-weight: bold; color: #0f172a; background: #fff; }
+    .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; }
+    
+    /* 詳細情報テーブル */
+    .detail-grid { width: 100%; border-collapse: collapse; font-size: 0.8em; margin-bottom: 8px; }
+    .detail-grid th { background: #e2e8f0; color: #334155; text-align: left; padding: 4px 6px; width: 30%; border: 1px solid #cbd5e1; white-space: nowrap; }
+    .detail-grid td { background: #fff; color: #0f172a; padding: 4px 6px; border: 1px solid #cbd5e1; font-weight: bold; word-break: break-all; }
+    .val-highlight { color: #2563eb; font-size: 1.05em; }
 
-    #status { font-weight: bold; margin: 10px 0; color: #2563eb; font-size: 0.9em; min-height: 1.2em; }
-    .btn-main { background: #2563eb; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
-    .btn-next { background: #475569; color: white; border: none; padding: 10px; font-size: 0.9em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 12px; }
-    .loading-spinner { font-size: 0.8em; color: #d97706; }
+    /* 実績テーブル横スクロール対応 */
+    .table-container { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 4px; }
+    .history-table { width: 100%; min-width: 380px; border-collapse: collapse; font-size: 0.75em; }
+    .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 4px 2px; text-align: center; white-space: nowrap; }
+    .history-table th { background: #f1f5f9; color: #475569; font-weight: bold; }
+    .history-table td { background: #fff; }
+    .row-title { background: #f8fafc !important; font-weight: bold; color: #475569; text-align: left !important; padding-left: 4px !important; }
+    .qty-val { color: #0f172a; font-weight: bold; }
+    .sales-val { color: #059669; font-weight: bold; }
+
+    #status { font-weight: bold; margin: 4px 0; color: #2563eb; font-size: 0.85em; min-height: 1.2em; }
+    .btn-main { background: #2563eb; color: white; border: none; padding: 10px; font-size: 0.95em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; }
+    .btn-next { background: #475569; color: white; border: none; padding: 10px; font-size: 0.9em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; }
+    .loading-spinner { font-size: 0.78em; color: #d97706; font-weight: bold; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>無音スキャナー（実績参照専用）</h2>
+  <h2>無音スキャナー（詳細＆実績照会）</h2>
   
   <div id="status">⚡️ 商品マスタ初期化中...</div>
   <div id="reader" style="display:none;"></div>
@@ -38,39 +63,61 @@
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
   <div id="result-box" class="result-box">
-    <div class="label">JANコード</div>
-    <div class="val" id="res-code">-</div>
-    
-    <div class="label">商品名</div>
-    <div class="val" id="res-name">-</div>
-    
-    <div class="label">規格</div>
-    <div class="spec" id="res-spec">-</div>
-
-    <div class="label" style="margin-top:12px;">📊 直近7日間の日別販売実績</div>
-    <div id="history-status" class="loading-spinner">実績データを照会中...</div>
-    <table class="history-table" id="history-table" style="display:none;">
-      <thead>
-        <tr id="history-header"></tr>
-      </thead>
-      <tbody>
-        <tr id="history-values"></tr>
-      </tbody>
+    <!-- 商品詳細一覧 -->
+    <table class="detail-grid">
+      <tr>
+        <th>JANコード</th>
+        <td id="res-code" class="val-highlight">-</td>
+      </tr>
+      <tr>
+        <th>商品名</th>
+        <td id="res-name">-</td>
+      </tr>
+      <tr>
+        <th>メーカー名</th>
+        <td id="res-maker">-</td>
+      </tr>
+      <tr>
+        <th>規格</th>
+        <td id="res-spec">-</td>
+      </tr>
+      <tr>
+        <th>原価 / 売価</th>
+        <td id="res-price">-</td>
+      </tr>
+      <tr>
+        <th>取引先コード</th>
+        <td id="res-supplier">-</td>
+      </tr>
     </table>
+
+    <!-- 直近7日間の実績 -->
+    <div style="font-size:0.8em; font-weight:bold; color:#475569; margin-top:6px;">📊 直近7日間の日別販売実績</div>
+    <div id="history-status" class="loading-spinner">実績データを照会中...</div>
+    
+    <div class="table-container" id="table-container" style="display:none;">
+      <table class="history-table">
+        <thead>
+          <tr id="history-header"></tr>
+        </thead>
+        <tbody>
+          <tr id="history-qty-row"></tr>
+          <tr id="history-sales-row"></tr>
+        </tbody>
+      </table>
+    </div>
     
     <button class="btn-next" onclick="resumeScan()">次をスキャン</button>
   </div>
 </div>
 
 <script>
-  // 指定のGASウェブアプリURL
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
-  let itemMasterMap = {}; // RAM（メモリ）一時キャッシュ用
+  let itemMasterMap = {};
   let isProcessing = false;
 
-  // 1. 初期起動時処理：商品マスタのみをRAMに読み込む
   window.addEventListener('DOMContentLoaded', () => {
     fetch(GAS_URL)
       .then(res => res.json())
@@ -88,16 +135,18 @@
       });
   });
 
-  // 2. カメラ起動
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
-    document.getElementById('reader').style.display = 'block';
+    document.getElementById('reader').style.display = 'flex';
     document.getElementById('status').innerText = "バーコードにかざしてください";
     
     isProcessing = false;
 
-    html5QrCode = new Html5Qrcode("reader");
-    const config = { fps: 10 }; // 全画面認識で高速スキャン
+    if (!html5QrCode) {
+      html5QrCode = new Html5Qrcode("reader");
+    }
+
+    const config = { fps: 10 };
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .catch(err => {
@@ -105,7 +154,6 @@
       });
   }
 
-  // 3. バーコード認識処理
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
     isProcessing = true;
@@ -115,18 +163,26 @@
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
 
-    // RAM（一時メモリ）から商品マスタを照会
     const found = itemMasterMap[digitsOnly] || itemMasterMap[numOnly] || itemMasterMap[padded13] || itemMasterMap[rawCode];
 
     if (found) {
+      // 💡 スキャン成功時はカメラエリアを一旦隠して画面を広く使う
+      document.getElementById('reader').style.display = 'none';
+
       document.getElementById('res-code').innerText = found.code;
       document.getElementById('res-name').innerText = found.name;
-      document.getElementById('res-spec').innerText = found.spec ? `[規格: ${found.spec}]` : "";
+      document.getElementById('res-maker').innerText = found.makerName;
+      document.getElementById('res-spec').innerText = found.spec;
       
+      const costStr = found.cost ? `¥${Number(found.cost).toLocaleString()}` : "-";
+      const priceStr = found.price ? `¥${Number(found.price).toLocaleString()}` : "-";
+      document.getElementById('res-price').innerText = `${costStr} / ${priceStr}`;
+      
+      document.getElementById('res-supplier').innerText = found.supplierCode;
+
       document.getElementById('status').innerText = "商品情報を取得しました";
       document.getElementById('result-box').style.display = "block";
 
-      // 該当商品の実績データのみをピンポイント問い合わせ
       fetchProductHistory(found.code);
     } else {
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
@@ -137,14 +193,13 @@
     }
   }
 
-  // 4. ピンポイント実績問い合わせ（軽量・爆速）
   function fetchProductHistory(code) {
     const historyStatus = document.getElementById('history-status');
-    const historyTable = document.getElementById('history-table');
+    const tableContainer = document.getElementById('table-container');
     
     historyStatus.style.display = "block";
     historyStatus.innerText = "⏳ 直近7日間の実績を照会中...";
-    historyTable.style.display = "none";
+    tableContainer.style.display = "none";
 
     fetch(`${GAS_URL}?code=${encodeURIComponent(code)}`)
       .then(res => res.json())
@@ -152,7 +207,7 @@
         if (data.success && data.history) {
           renderHistoryTable(data.history);
           historyStatus.style.display = "none";
-          historyTable.style.display = "table";
+          tableContainer.style.display = "block";
         } else {
           historyStatus.innerText = "⚠️ 実績データの取得に失敗しました";
         }
@@ -162,28 +217,35 @@
       });
   }
 
-  // 5. 直近7日間の実績表生成
   function renderHistoryTable(history) {
     const headerTr = document.getElementById('history-header');
-    const valuesTr = document.getElementById('history-values');
+    const qtyTr = document.getElementById('history-qty-row');
+    const salesTr = document.getElementById('history-sales-row');
     
-    headerTr.innerHTML = "";
-    valuesTr.innerHTML = "";
+    headerTr.innerHTML = "<th>項目</th>";
+    qtyTr.innerHTML = "<td class='row-title'>数量</td>";
+    salesTr.innerHTML = "<td class='row-title'>売上</td>";
 
     history.forEach(item => {
       const th = document.createElement('th');
       th.innerText = item.displayDate;
       headerTr.appendChild(th);
 
-      const td = document.createElement('td');
-      td.innerText = item.qty;
-      valuesTr.appendChild(td);
+      const tdQty = document.createElement('td');
+      tdQty.className = "qty-val";
+      tdQty.innerText = item.qty.toLocaleString();
+      qtyTr.appendChild(tdQty);
+
+      const tdSales = document.createElement('td');
+      tdSales.className = "sales-val";
+      tdSales.innerText = item.sales > 0 ? `¥${item.sales.toLocaleString()}` : "¥0";
+      salesTr.appendChild(tdSales);
     });
   }
 
-  // 次のスキャンへ遷移
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
+    document.getElementById('reader').style.display = 'flex'; // カメラ枠を再表示
     document.getElementById('status').innerText = "バーコードにかざしてください";
     isProcessing = false;
   }
