@@ -3,97 +3,211 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>商品無音スキャナー</title>
+  <title>高速バーコード＆実績スキャナー</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; text-align: center; margin: 0; padding: 15px; background: #f4f6f8; }
-    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 400px; margin: 0 auto; }
-    h2 { font-size: 1.2em; color: #333; margin-top: 0; }
-    #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 15px; background: #000; }
-    .result-box { text-align: left; background: #eef2f5; padding: 15px; border-radius: 8px; margin-top: 15px; display: none; }
-    .label { font-size: 0.8em; color: #666; margin-top: 5px; }
-    .val { font-size: 1.1em; font-weight: bold; color: #333; }
-    .price { font-size: 1.4em; font-weight: bold; color: #e63946; }
-    #status { font-weight: bold; margin: 10px 0; color: #007bff; font-size: 0.95em; }
-    button { background: #007bff; color: white; border: none; padding: 14px 20px; font-size: 1em; border-radius: 8px; width: 100%; cursor: pointer; font-weight: bold; }
+    body { font-family: -apple-system, sans-serif; margin: 0; padding: 12px; background: #f4f6f8; text-align: center; }
+    .card { background: white; padding: 16px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); max-width: 420px; margin: 0 auto; }
+    h2 { font-size: 1.1em; color: #333; margin-top: 0; }
+    #reader { width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 12px; background: #000; }
+    
+    /* 読み取り完了後の詳細表示 */
+    .confirm-box { text-align: left; background: #eef2f5; padding: 12px; border-radius: 8px; margin-top: 12px; display: none; }
+    .label { font-size: 0.75em; color: #666; margin-top: 6px; }
+    .val { font-size: 1em; font-weight: bold; color: #333; }
+    .price { font-size: 1.2em; font-weight: bold; color: #e63946; }
+    
+    /* 直近7日間の実績テーブル */
+    .history-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.85em; }
+    .history-table th, .history-table td { border: 1px solid #ccc; padding: 4px 6px; text-align: center; }
+    .history-table th { background: #e0e6ed; }
+
+    input[type="number"] { width: 70px; padding: 6px; font-size: 1em; border-radius: 4px; border: 1px solid #ccc; }
+    
+    #status { font-weight: bold; margin: 8px 0; color: #007bff; font-size: 0.9em; }
+    .btn-main { background: #007bff; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; }
+    .btn-save { background: #28a745; color: white; border: none; padding: 10px; font-size: 1em; border-radius: 6px; width: 100%; font-weight: bold; cursor: pointer; margin-top: 10px; }
+    .btn-cancel { background: #6c757d; color: white; border: none; padding: 6px; font-size: 0.85em; border-radius: 4px; width: 100%; margin-top: 6px; cursor: pointer; }
   </style>
 </head>
 <body>
 
 <div class="card">
-  <h2>無音商品スキャナー</h2>
-  <div id="reader"></div>
+  <h2>無音スキャナー ＆ 7日間実績照会</h2>
   
-  <button id="start-btn" onclick="startScan()">📷 カメラを起動する</button>
-  <div id="status">ボタンを押すとスキャンを開始します</div>
+  <div id="status">⚡️ マスタ・実績データ初期ロード中...</div>
+  <div id="reader" style="display:none;"></div>
+  
+  <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
-  <div id="result-box" class="result-box">
+  <!-- 照会＆登録フォーム -->
+  <div id="confirm-box" class="confirm-box">
     <div class="label">商品コード</div>
     <div class="val" id="res-code">-</div>
+    
     <div class="label">商品名</div>
     <div class="val" id="res-name">-</div>
-    <div class="label">価格</div>
+    
+    <div class="label">単価</div>
     <div class="price" id="res-price">-</div>
+
+    <!-- 直近7日間の日別実績表示エリア -->
+    <div class="label">📊 直近7日間の日別販売数（日付・曜日）</div>
+    <table class="history-table">
+      <thead>
+        <tr id="history-header"></tr>
+      </thead>
+      <tbody>
+        <tr id="history-values"></tr>
+      </tbody>
+    </table>
+    
+    <div class="label" style="margin-top:10px;">今回登録数量</div>
+    <input type="number" id="res-qty" value="1" min="1">
+
+    <button class="btn-save" onclick="saveData()">＋ 実績として登録</button>
+    <button class="btn-cancel" onclick="resumeScan()">キャンセルして次をスキャン</button>
   </div>
 </div>
 
 <script>
-  // ★ここにステップ1で取得したウェブアプリURLを貼り付けます★
+  // ★GASのウェブアプリURLを貼り付けます
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
-  let isScanning = false;
+  let itemMaster = [];
+  let recentDays = [];
+  let historyData = {};
+  let currentItem = null;
 
-  function startScan() {
-    if (isScanning) return;
-    document.getElementById('start-btn').style.display = 'none';
-    document.getElementById('status').innerText = "バーコードにかざしてください";
-
-    html5QrCode = new Html5Qrcode("reader");
-    // バーコード（JANコード）が読み取りやすい横長の枠に設定
-    const config = { fps: 10, qrbox: { width: 260, height: 140 } };
-
-    html5QrCode.start(
-      { facingMode: "environment" }, 
-      config, 
-      onScanSuccess
-    ).catch(err => {
-      document.getElementById('status').innerText = "カメラの起動に失敗しました。アクセスを許可してください。";
-      document.getElementById('start-btn').style.display = 'block';
-    });
-
-    isScanning = true;
-  }
-
-  function onScanSuccess(decodedText) {
-    // 連投防止のため一瞬スキャンをポーズ
-    html5QrCode.pause();
-    document.getElementById('status').innerText = "マスタを検索中: " + decodedText;
-
-    // GASに商品情報を問い合わせ
-    fetch(`${GAS_URL}?code=${encodeURIComponent(decodedText)}`)
+  // 1. ページロード時に一括高速読み込み
+  window.addEventListener('DOMContentLoaded', () => {
+    fetch(GAS_URL)
       .then(res => res.json())
       .then(data => {
         if (data.success) {
-          document.getElementById('status').innerText = "読み取り成功！";
-          document.getElementById('res-code').innerText = data.code;
-          document.getElementById('res-name').innerText = data.name;
-          document.getElementById('res-price').innerText = Number(data.price).toLocaleString() + " 円";
-          document.getElementById('result-box').style.display = "block";
+          itemMaster = data.itemMaster || [];
+          recentDays = data.recentDays || [];
+          historyData = data.historyData || {};
+          
+          document.getElementById('status').innerText = "✅ 展開完了！カメラを起動してください";
+          document.getElementById('start-btn').style.display = 'block';
         } else {
-          document.getElementById('status').innerText = data.message;
+          document.getElementById('status').innerText = "データロード失敗";
         }
-        
-        // 2秒後に自動で次のスキャン待機状態に戻る（連続スキャン可能）
-        setTimeout(() => {
-          document.getElementById('status').innerText = "バーコードにかざしてください";
-          html5QrCode.resume();
-        }, 2000);
       })
       .catch(err => {
         document.getElementById('status').innerText = "通信エラーが発生しました";
-        setTimeout(() => html5QrCode.resume(), 2000);
       });
+  });
+
+  // 2. カメラ起動
+  function startScan() {
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('reader').style.display = 'block';
+    document.getElementById('status').innerText = "バーコードにかざしてください";
+
+    html5QrCode = new Html5Qrcode("reader");
+    const config = { fps: 10, qrbox: { width: 260, height: 140 } };
+
+    html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+      .catch(err => {
+        document.getElementById('status').innerText = "カメラ起動エラー: " + err;
+      });
+  }
+
+  // 3. バーコード認識（メモリ内から爆速照会）
+  function onScanSuccess(decodedText) {
+    html5QrCode.pause();
+    
+    // メモリ上の商品マスタから検索 (code / jan / id などのキーに対応)
+    const found = itemMaster.find(item => 
+      String(item.code || item.JAN || item.id).trim() === String(decodedText).trim()
+    );
+
+    if (found) {
+      currentItem = {
+        code: decodedText,
+        name: found.name || found.商品名 || "名称未設定",
+        price: found.price || found.単価 || 0
+      };
+      
+      // 画面出力
+      document.getElementById('res-code').innerText = currentItem.code;
+      document.getElementById('res-name').innerText = currentItem.name;
+      document.getElementById('res-price').innerText = Number(currentItem.price).toLocaleString() + " 円";
+      
+      // 直近7日間の実績を集計して表にセット
+      renderHistoryTable(decodedText);
+
+      document.getElementById('status').innerText = "内容を確認してください";
+      document.getElementById('confirm-box').style.display = "block";
+    } else {
+      document.getElementById('status').innerText = "未登録コード: " + decodedText;
+      setTimeout(() => { html5QrCode.resume(); }, 2000);
+    }
+  }
+
+  // 4. 直近7日間の実績テーブル生成
+  function renderHistoryTable(code) {
+    const headerTr = document.getElementById('history-header');
+    const valuesTr = document.getElementById('history-values');
+    
+    headerTr.innerHTML = "";
+    valuesTr.innerHTML = "";
+
+    recentDays.forEach(day => {
+      // ヘッダー（日付と曜日）
+      const th = document.createElement('th');
+      th.innerText = day.displayDate; // 例: 07/07(火)
+      headerTr.appendChild(th);
+
+      // 実績集計
+      const dayRecords = historyData[day.dateStr] || [];
+      const totalQty = dayRecords
+        .filter(r => String(r.code).trim() === String(code).trim())
+        .reduce((sum, r) => sum + Number(r.qty || 1), 0);
+
+      const td = document.createElement('td');
+      td.innerText = totalQty;
+      valuesTr.appendChild(td);
+    });
+  }
+
+  // 5. 登録（今日のJSONへ追加更新）
+  function saveData() {
+    if (!currentItem) return;
+    const qty = document.getElementById('res-qty').value;
+    document.getElementById('status').innerText = "実績登録中...";
+
+    fetch(GAS_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        code: currentItem.code,
+        name: currentItem.name,
+        price: currentItem.price,
+        qty: qty
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        document.getElementById('status').innerText = "✅ 登録完了！";
+        document.getElementById('confirm-box').style.display = "none";
+        setTimeout(() => {
+          document.getElementById('status').innerText = "バーコードにかざしてください";
+          html5QrCode.resume();
+        }, 1200);
+      } else {
+        document.getElementById('status').innerText = "保存エラー: " + data.message;
+      }
+    });
+  }
+
+  function resumeScan() {
+    document.getElementById('confirm-box').style.display = "none";
+    document.getElementById('status').innerText = "バーコードにかざしてください";
+    html5QrCode.resume();
   }
 </script>
 
