@@ -35,7 +35,7 @@
     .loading-spinner { font-size: 0.8em; color: #d97706; font-weight: bold; }
     
     .filter-group { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; background: #e0f2fe; padding: 6px 8px; border-radius: 6px; border: 1px solid #bae6fd; }
-    select { padding: 4px 6px; font-size: 0.85rem; font-weight: bold; border-radius: 4px; border: 1px solid #94a3b8; color: #0f172a; outline: none; }
+    select { padding: 4px 6px; font-size: 0.85rem; font-weight: bold; border-radius: 4px; border: 1px solid #94a3b8; color: #0f172a; outline: none; max-width: 50%; }
   </style>
 </head>
 <body>
@@ -94,7 +94,18 @@
   let html5QrCode;
   let itemMasterMap = {};
   let isProcessing = false;
-  let currentScanCode = null;
+  
+  // 💡 フロントエンドの一時キャッシュ変数
+  let appStoreList = [];
+  let currentHistoryMap = {}; 
+
+  // 💡 店舗名を綺麗に変換する関数
+  function getStoreName(code) {
+    if (code === "ALL") return "全店舗合計";
+    const cleanCode = code.replace(/^0+/, '');
+    const found = appStoreList.find(s => s.code === code || s.code === cleanCode || s.code.replace(/^0+/, '') === cleanCode);
+    return found ? found.name.replace("店", "") + "店" : code + "店";
+  }
 
   window.addEventListener('DOMContentLoaded', () => {
     fetch(GAS_URL)
@@ -102,17 +113,7 @@
       .then(data => {
         if (data.success && data.itemMasterMap) {
           itemMasterMap = data.itemMasterMap;
-          
-          if (data.stores && data.stores.length > 0) {
-            const storeFilter = document.getElementById("store-filter");
-            storeFilter.innerHTML = '<option value="ALL">全店舗合計</option>';
-            data.stores.forEach(st => {
-              const opt = document.createElement("option");
-              opt.value = st;
-              opt.innerText = st + "店";
-              storeFilter.appendChild(opt);
-            });
-          }
+          appStoreList = data.storeList || []; // GASから受け取った店舗マスタ
 
           document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
           document.getElementById('start-btn').style.display = 'block';
@@ -131,9 +132,11 @@
     document.getElementById('status').innerText = "バーコードにかざしてください";
     isProcessing = false;
 
-    if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
-    html5QrCode.start({ facingMode: "environment" }, { fps: 10 }, onScanSuccess)
-      .catch(err => { document.getElementById('status').innerText = "カメラエラー: " + err; });
+    if (!html5QrCode) {
+      html5QrCode = new Html5Qrcode("reader");
+      html5QrCode.start({ facingMode: "environment" }, { fps: 10 }, onScanSuccess)
+        .catch(err => { document.getElementById('status').innerText = "カメラエラー: " + err; });
+    }
   }
 
   function onScanSuccess(decodedText) {
@@ -145,15 +148,13 @@
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
 
-    // 💡 検索候補のリストを作成
     let searchCodes = [digitsOnly, numOnly, padded13, rawCode];
 
-    // 💡 インストアコード（不定貫）の特別対応
-    // 頭が「02」または「2」で始まる場合、下5桁を「00000」に強制変換したコードも検索候補に追加
+    // インストアコード（不定貫）の特別対応
     if (padded13.startsWith("02") || padded13.startsWith("2")) {
-      const instore13 = padded13.substring(0, 8) + "00000"; // 上8桁を取得して下5桁を0にする
+      const instore13 = padded13.substring(0, 8) + "00000"; 
       searchCodes.push(instore13);
-      searchCodes.push(String(Number(instore13))); // ゼロ落ち版
+      searchCodes.push(String(Number(instore13)));
     }
 
     let found = null;
@@ -167,10 +168,8 @@
     if (found) {
       document.getElementById('reader').style.display = 'none';
       
-      // スキャンした生コードと、マスタに登録されている元コードの両方を表示
       document.getElementById('res-scan-code').innerText = rawCode;
       document.getElementById('res-code').innerText = found.code;
-
       document.getElementById('res-name').innerText = found.name;
       document.getElementById('res-maker').innerText = found.makerName;
       document.getElementById('res-spec').innerText = found.spec;
@@ -198,27 +197,47 @@
     }
   }
 
+  // 💡 プルダウン変更時（通信せずにフロント金庫から即時切り替え）
   function refetchHistory() {
-    if (!currentScanCode) return;
-    fetchProductHistory(currentScanCode);
+    const storeFilter = document.getElementById("store-filter").value;
+    if (currentHistoryMap && currentHistoryMap[storeFilter]) {
+      renderHistoryTable(currentHistoryMap[storeFilter]);
+    }
   }
 
   function fetchProductHistory(code) {
-    currentScanCode = code;
-    const store = document.getElementById('store-filter').value;
-    
     const historyStatus = document.getElementById('history-status');
     const tableContainer = document.getElementById('table-container');
     
     historyStatus.style.display = "block";
-    historyStatus.innerText = "⏳ 実績を照会中...";
+    historyStatus.innerText = "⏳ 実績を一括照会中...";
     tableContainer.style.display = "none";
 
-    fetch(`${GAS_URL}?code=${encodeURIComponent(code)}&store=${encodeURIComponent(store)}`)
+    // 💡 1回で全店舗のデータをまとめて取ってくる
+    fetch(`${GAS_URL}?code=${encodeURIComponent(code)}`)
       .then(res => res.json())
       .then(data => {
-        if (data.success && data.history) {
-          renderHistoryTable(data.history);
+        if (data.success && data.historyMap) {
+          currentHistoryMap = data.historyMap; // フロントキャッシュに保存
+          
+          // プルダウンのリストを実績が存在する店舗で再構築
+          const storeFilter = document.getElementById("store-filter");
+          const currentVal = storeFilter.value;
+          storeFilter.innerHTML = "";
+          
+          const availableStores = Object.keys(currentHistoryMap).sort();
+          if (availableStores.includes("ALL")) {
+            storeFilter.appendChild(new Option(getStoreName("ALL"), "ALL"));
+          }
+          availableStores.forEach(st => {
+            if (st !== "ALL") storeFilter.appendChild(new Option(getStoreName(st), st));
+          });
+
+          if (availableStores.includes(currentVal)) storeFilter.value = currentVal;
+
+          // 描画実行
+          renderHistoryTable(currentHistoryMap[storeFilter.value]);
+          
           historyStatus.style.display = "none";
           tableContainer.style.display = "block";
         } else {
@@ -230,7 +249,8 @@
       });
   }
 
-  function renderHistoryTable(history) {
+  function renderHistoryTable(historyArray) {
+    if (!historyArray) return;
     const headerTr = document.getElementById('history-header');
     const qtyTr = document.getElementById('history-qty-row');
     const salesTr = document.getElementById('history-sales-row');
@@ -239,7 +259,7 @@
     qtyTr.innerHTML = "<td class='row-title'>数量(点)</td>";
     salesTr.innerHTML = "<td class='row-title'>売上(円)</td>";
 
-    history.forEach(item => {
+    historyArray.forEach(item => {
       const th = document.createElement('th');
       th.innerText = item.displayDate;
       headerTr.appendChild(th);
@@ -256,11 +276,22 @@
     });
   }
 
+  // 💡 次のスキャンボタン：カメラを完全にシャットダウンして誤爆を防ぐ
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
-    document.getElementById('reader').style.display = 'flex';
-    document.getElementById('status').innerText = "バーコードにかざしてください";
+    document.getElementById('start-btn').style.display = 'block';
+    document.getElementById('reader').style.display = 'none';
+    document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
     isProcessing = false;
+
+    if (html5QrCode) {
+      try {
+        html5QrCode.stop().then(() => {
+          html5QrCode.clear();
+          html5QrCode = null; // システムから完全に切り離す
+        }).catch(err => { html5QrCode = null; });
+      } catch(e) { html5QrCode = null; }
+    }
   }
 </script>
 
