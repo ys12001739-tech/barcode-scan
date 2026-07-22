@@ -88,23 +88,32 @@
 </div>
 
 <script>
-  // ★GASのURLに書き換えてください
+  // ★GASのURLを指定
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
   let itemMasterMap = {};
-  let isProcessing = false;
   
-  // 💡 フロントエンドの一時キャッシュ変数
-  let appStoreList = [];
+  // 💡 初期状態はロックして誤爆を完全に防ぐ
+  let isProcessing = true; 
+  let currentScanCode = null;
   let currentHistoryMap = {}; 
 
-  // 💡 店舗名を綺麗に変換する関数
+  // 💡 ご指定いただいた店舗名の固定辞書（マップ）
+  const storeNameMap = {
+    "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
+    "1901": "普天間", "1904": "三原", "1905": "浦西", "1906": "浦添",
+    "1908": "西町", "1909": "大平", "1910": "食品館", "1911": "豊崎"
+  };
+
+  // 💡 店舗コードから正確な名前に変換する関数
   function getStoreName(code) {
     if (code === "ALL") return "全店舗合計";
-    const cleanCode = code.replace(/^0+/, '');
-    const found = appStoreList.find(s => s.code === code || s.code === cleanCode || s.code.replace(/^0+/, '') === cleanCode);
-    return found ? found.name.replace("店", "") + "店" : code + "店";
+    const cleanCode = code.replace(/^0+/, ''); // 先頭の0を除去して検索
+    if (storeNameMap[cleanCode]) {
+      return storeNameMap[cleanCode] + "店";
+    }
+    return code + "店"; // 辞書にない場合はコードをそのまま表示
   }
 
   window.addEventListener('DOMContentLoaded', () => {
@@ -113,7 +122,6 @@
       .then(data => {
         if (data.success && data.itemMasterMap) {
           itemMasterMap = data.itemMasterMap;
-          appStoreList = data.storeList || []; // GASから受け取った店舗マスタ
 
           document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
           document.getElementById('start-btn').style.display = 'block';
@@ -129,19 +137,36 @@
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'flex';
-    document.getElementById('status').innerText = "バーコードにかざしてください";
-    isProcessing = false;
+    document.getElementById('status').innerText = "カメラを起動中...";
+    
+    // 💡 カメラが完全に立ち上がるまで読み込みをブロック
+    isProcessing = true; 
 
     if (!html5QrCode) {
       html5QrCode = new Html5Qrcode("reader");
-      html5QrCode.start({ facingMode: "environment" }, { fps: 10 }, onScanSuccess)
-        .catch(err => { document.getElementById('status').innerText = "カメラエラー: " + err; });
     }
+
+    const config = { fps: 10 };
+
+    html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+      .then(() => {
+        // カメラが正常に起動してからロックを解除
+        document.getElementById('status').innerText = "バーコードにかざしてください";
+        isProcessing = false;
+      })
+      .catch(err => { 
+        document.getElementById('status').innerText = "カメラエラー: " + err; 
+      });
   }
 
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    isProcessing = true;
+    isProcessing = true; // 💡 スキャンした瞬間に即座にロックをかける！
+    
+    // 💡 裏で別のコードを読まないようにカメラ映像を一時停止
+    if (html5QrCode) {
+      try { html5QrCode.pause(); } catch(e) {}
+    }
     
     const rawCode = String(decodedText).trim();
     const digitsOnly = rawCode.replace(/[^0-9]/g, '');
@@ -192,12 +217,13 @@
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
         document.getElementById('status').innerText = "バーコードにかざしてください";
-        isProcessing = false; 
+        if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} } // カメラ再開
+        isProcessing = false; // 再スキャン許可
       }, 1500);
     }
   }
 
-  // 💡 プルダウン変更時（通信せずにフロント金庫から即時切り替え）
+  // フロント金庫からの瞬時切り替え
   function refetchHistory() {
     const storeFilter = document.getElementById("store-filter").value;
     if (currentHistoryMap && currentHistoryMap[storeFilter]) {
@@ -206,6 +232,9 @@
   }
 
   function fetchProductHistory(code) {
+    currentScanCode = code;
+    const store = document.getElementById('store-filter').value;
+    
     const historyStatus = document.getElementById('history-status');
     const tableContainer = document.getElementById('table-container');
     
@@ -213,14 +242,12 @@
     historyStatus.innerText = "⏳ 実績を一括照会中...";
     tableContainer.style.display = "none";
 
-    // 💡 1回で全店舗のデータをまとめて取ってくる
     fetch(`${GAS_URL}?code=${encodeURIComponent(code)}`)
       .then(res => res.json())
       .then(data => {
         if (data.success && data.historyMap) {
-          currentHistoryMap = data.historyMap; // フロントキャッシュに保存
+          currentHistoryMap = data.historyMap;
           
-          // プルダウンのリストを実績が存在する店舗で再構築
           const storeFilter = document.getElementById("store-filter");
           const currentVal = storeFilter.value;
           storeFilter.innerHTML = "";
@@ -235,7 +262,6 @@
 
           if (availableStores.includes(currentVal)) storeFilter.value = currentVal;
 
-          // 描画実行
           renderHistoryTable(currentHistoryMap[storeFilter.value]);
           
           historyStatus.style.display = "none";
@@ -276,19 +302,21 @@
     });
   }
 
-  // 💡 次のスキャンボタン：カメラを完全にシャットダウンして誤爆を防ぐ
   function resumeScan() {
+    // 💡 画面を閉じてボタンを再表示
     document.getElementById('result-box').style.display = "none";
     document.getElementById('start-btn').style.display = 'block';
     document.getElementById('reader').style.display = 'none';
     document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
-    isProcessing = false;
+    
+    // 💡 ここでは「isProcessing = false」にはせず、強固にロックしたままにする！
+    // 次に「カメラ起動（startScan）」を押すまで絶対に反応しません。
 
     if (html5QrCode) {
       try {
         html5QrCode.stop().then(() => {
           html5QrCode.clear();
-          html5QrCode = null; // システムから完全に切り離す
+          html5QrCode = null; // カメラをシステムから完全にシャットダウン
         }).catch(err => { html5QrCode = null; });
       } catch(e) { html5QrCode = null; }
     }
