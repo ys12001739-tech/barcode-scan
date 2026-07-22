@@ -20,14 +20,17 @@
     .detail-grid td { background: #fff; color: #0f172a; padding: 6px; border: 1px solid #cbd5e1; font-weight: bold; word-wrap: break-word; overflow-wrap: break-word; }
     .val-highlight { color: #2563eb; font-size: 1.05em; }
 
+    .auto-order-group { background: #ecfdf5; border: 1px solid #a7f3d0; padding: 8px; border-radius: 6px; margin-bottom: 10px; font-size: 0.85em; }
+    .auto-order-grid { width: 100%; border-collapse: collapse; }
+    .auto-order-grid th { text-align: left; color: #065f46; width: 40%; padding: 4px; border-bottom: 1px dashed #a7f3d0; }
+    .auto-order-grid td { text-align: right; font-weight: bold; color: #047857; padding: 4px; border-bottom: 1px dashed #a7f3d0; }
+
     .table-container { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin-top: 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; }
     .history-table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: 0.75em; }
     .history-table th, .history-table td { border: 1px solid #cbd5e1; padding: 6px 4px; text-align: center; white-space: nowrap; }
     .history-table th { background: #f1f5f9; color: #475569; font-weight: bold; }
     .history-table td { background: #fff; }
     .row-title { background: #f8fafc !important; font-weight: bold; color: #475569; text-align: left !important; padding-left: 6px !important; position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1; }
-    .qty-val { color: #0f172a; font-weight: bold; }
-    .sales-val { color: #059669; font-weight: bold; }
 
     #status { font-weight: bold; margin: 6px 0; color: #2563eb; font-size: 0.85em; min-height: 1.2em; }
     .btn-main { background: #2563eb; color: white; border: none; padding: 12px; font-size: 1em; border-radius: 8px; width: 100%; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
@@ -43,12 +46,31 @@
 <div class="card">
   <h2>無音スキャナー（詳細＆実績照会）</h2>
   
-  <div id="status">⚡️ 商品マスタ初期化中...</div>
+  <div id="status">⚡️ マスタ初期化中...</div>
   <div id="reader" style="display:none;"></div>
   
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
   <div id="result-box" class="result-box">
+    
+    <!-- 💡 店舗絞り込みフィルタ（手動ハードコード化） -->
+    <div class="filter-group">
+      <div style="font-size:0.85em; font-weight:bold; color:#1e40af;">🏪 参照店舗の選択</div>
+      <select id="store-filter" onchange="updateViewByStore()">
+        <!-- JSで動的に追加されます -->
+      </select>
+    </div>
+
+    <!-- 💡 自動発注データ領域 -->
+    <div class="auto-order-group">
+      <div style="font-weight:bold; color:#065f46; margin-bottom:4px;">🛒 店舗ごとの自動発注情報</div>
+      <table class="auto-order-grid">
+        <tr><th>通路番号</th><td id="ao-aisle">-</td></tr>
+        <tr><th>最大陳列数</th><td id="ao-max">-</td></tr>
+        <tr><th>発注点</th><td id="ao-point">-</td></tr>
+      </table>
+    </div>
+
     <table class="detail-grid">
       <tr><th>スキャンコード</th><td id="res-scan-code" class="val-highlight" style="color:#64748b;">-</td></tr>
       <tr><th>マスタ登録JAN</th><td id="res-code" class="val-highlight">-</td></tr>
@@ -64,13 +86,7 @@
       <tr><th>原価 / 売価</th><td id="res-price">-</td></tr>
     </table>
 
-    <div class="filter-group">
-      <div style="font-size:0.85em; font-weight:bold; color:#1e40af;">📊 日別販売実績 (直近7日)</div>
-      <select id="store-filter" onchange="refetchHistory()">
-        <option value="ALL">全店舗合計</option>
-      </select>
-    </div>
-
+    <div style="font-size:0.85em; font-weight:bold; color:#1e40af; margin-top:10px;">📊 日別販売実績 (直近7日)</div>
     <div id="history-status" class="loading-spinner">実績データを照会中...</div>
     
     <div class="table-container" id="table-container" style="display:none;">
@@ -88,32 +104,38 @@
 </div>
 
 <script>
-  // ★GASのURLに書き換えてください
+  // ★GASのURLを指定
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
   let itemMasterMap = {};
+  let autoOrderMap = {}; // 💡 自動発注用
   
   let isProcessing = true; 
   let currentScanCode = null;
   let currentHistoryMap = {}; 
-  let appStoreList = [];
 
-  // 店舗名を綺麗に変換する関数
-  function getStoreName(code) {
-    if (code === "ALL") return "全店舗合計";
-    const cleanCode = code.replace(/^0+/, '');
-    const found = appStoreList.find(s => s.code === code || s.code === cleanCode || s.code.replace(/^0+/, '') === cleanCode);
-    return found ? found.name.replace("店", "") + "店" : code + "店";
-  }
+  // 💡 店舗名を直接コードで指定（指示通り復活）
+  const storeNameMap = {
+    "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
+    "1901": "普天間", "1904": "三原", "1905": "浦西", "1906": "浦添",
+    "1908": "西町", "1909": "大平", "1910": "食品館", "1911": "豊崎"
+  };
 
   window.addEventListener('DOMContentLoaded', () => {
+    // 💡 店舗プルダウンの構築
+    const storeFilter = document.getElementById("store-filter");
+    storeFilter.innerHTML = '<option value="ALL">全店舗合計</option>';
+    Object.keys(storeNameMap).forEach(code => {
+      storeFilter.appendChild(new Option(storeNameMap[code] + "店", code));
+    });
+
     fetch(GAS_URL)
       .then(res => res.json())
       .then(data => {
         if (data.success && data.itemMasterMap) {
           itemMasterMap = data.itemMasterMap;
-          appStoreList = data.storeList || [];
+          autoOrderMap = data.autoOrderMap || {}; // 自動発注データを保管
 
           document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
           document.getElementById('start-btn').style.display = 'block';
@@ -151,9 +173,8 @@
 
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    isProcessing = true; // 💡 スキャンした瞬間に即座にロックをかける
+    isProcessing = true; 
     
-    // 💡 裏で別のコードを読まないようにカメラ映像を一時停止
     if (html5QrCode) {
       try { html5QrCode.pause(); } catch(e) {}
     }
@@ -163,17 +184,11 @@
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
     
-    // 💡 短縮JAN（8桁）や輸入UPC（12桁）などあらゆる桁の揺れを吸収する候補を生成
     let searchCodes = [
-      digitsOnly, 
-      numOnly, 
-      padded13, 
-      rawCode,
-      digitsOnly.padStart(8, '0'),  // 短縮JANとしてのゼロ埋め
-      digitsOnly.padStart(12, '0')  // UPCコードとしてのゼロ埋め
+      digitsOnly, numOnly, padded13, rawCode,
+      digitsOnly.padStart(8, '0'), digitsOnly.padStart(12, '0')
     ];
 
-    // インストアコード（不定貫）の特別対応
     if (padded13.startsWith("02") || padded13.startsWith("2")) {
       const instore13 = padded13.substring(0, 8) + "00000"; 
       searchCodes.push(instore13);
@@ -210,6 +225,12 @@
       document.getElementById('status').innerText = "商品情報を取得しました";
       document.getElementById('result-box').style.display = "block";
 
+      currentScanCode = found.code; // グローバル保管
+
+      // 💡 自動発注と実績の画面更新
+      updateViewByStore();
+
+      // GASへ実績を取りに行く
       fetchProductHistory(found.code);
     } else {
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
@@ -221,17 +242,31 @@
     }
   }
 
-  function refetchHistory() {
-    const storeFilter = document.getElementById("store-filter").value;
-    if (currentHistoryMap && currentHistoryMap[storeFilter]) {
-      renderHistoryTable(currentHistoryMap[storeFilter]);
+  // 💡 プルダウン変更時 ＆ スキャン時に呼ばれる統合関数
+  function updateViewByStore() {
+    if (!currentScanCode) return;
+    
+    const storeVal = document.getElementById("store-filter").value;
+    
+    // ① 自動発注データの描画更新
+    let aoData = { aisle: "-", max: "-", point: "-" };
+    if (storeVal !== "ALL" && autoOrderMap[storeVal] && autoOrderMap[storeVal][currentScanCode]) {
+      aoData = autoOrderMap[storeVal][currentScanCode];
+    }
+    document.getElementById("ao-aisle").innerText = aoData.aisle;
+    document.getElementById("ao-max").innerText = aoData.max;
+    document.getElementById("ao-point").innerText = aoData.point;
+
+    // ② 実績テーブルの描画更新（キャッシュがあれば）
+    if (currentHistoryMap && currentHistoryMap[storeVal]) {
+      renderHistoryTable(currentHistoryMap[storeVal]);
+    } else if (currentHistoryMap && currentHistoryMap["0" + storeVal]) {
+      // ゼロ埋めコードの場合のフォールバック
+      renderHistoryTable(currentHistoryMap["0" + storeVal]);
     }
   }
 
   function fetchProductHistory(code) {
-    currentScanCode = code;
-    const store = document.getElementById('store-filter').value;
-    
     const historyStatus = document.getElementById('history-status');
     const tableContainer = document.getElementById('table-container');
     
@@ -245,21 +280,8 @@
         if (data.success && data.historyMap) {
           currentHistoryMap = data.historyMap;
           
-          const storeFilter = document.getElementById("store-filter");
-          const currentVal = storeFilter.value;
-          storeFilter.innerHTML = "";
-          
-          const availableStores = Object.keys(currentHistoryMap).sort();
-          if (availableStores.includes("ALL")) {
-            storeFilter.appendChild(new Option(getStoreName("ALL"), "ALL"));
-          }
-          availableStores.forEach(st => {
-            if (st !== "ALL") storeFilter.appendChild(new Option(getStoreName(st), st));
-          });
-
-          if (availableStores.includes(currentVal)) storeFilter.value = currentVal;
-
-          renderHistoryTable(currentHistoryMap[storeFilter.value]);
+          // 店舗プルダウンの内容は変えずに、現在の選択値で再描画する
+          updateViewByStore();
           
           historyStatus.style.display = "none";
           tableContainer.style.display = "block";
@@ -299,19 +321,17 @@
     });
   }
 
-  // 💡 「次をスキャン」を押した時の安全な再開処理
   function resumeScan() {
-    // まず画面上の要素をカメラモードに切り替える
     document.getElementById('result-box').style.display = "none";
-    document.getElementById('reader').style.display = 'flex';
-    document.getElementById('status').innerText = "バーコードにかざしてください";
+    document.getElementById('start-btn').style.display = 'block';
+    document.getElementById('reader').style.display = 'none';
+    document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
     
-    // 💡 画面が切り替わってから少しだけディレイ（0.5秒）を入れてカメラを再開（誤爆防止）
     setTimeout(() => {
       if (html5QrCode) {
         try { html5QrCode.resume(); } catch(e) {}
       }
-      isProcessing = false; // ディレイ後にロック解除
+      isProcessing = false; 
     }, 500);
   }
 </script>
