@@ -53,11 +53,11 @@
 
   <div id="result-box" class="result-box">
     
-    <!-- 🏪 店舗絞り込みフィルタ -->
+    <!-- 🏪 店舗絞り込みフィルタ（ハードコード固定） -->
     <div class="filter-group">
       <div style="font-size:0.85em; font-weight:bold; color:#1e40af;">🏪 参照店舗の選択</div>
       <select id="store-filter" onchange="updateViewByStore()">
-        <!-- JSで動的に追加されます -->
+        <!-- JSで初期化されます -->
       </select>
     </div>
 
@@ -115,7 +115,7 @@
   let currentScanCode = null;
   let currentHistoryMap = {}; 
 
-  // 💡 店舗名を直接コードで指定
+  // 💡 店舗名を直接コードで指定（勝手にリセットされないように固定）
   const storeNameMap = {
     "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
     "1901": "普天間", "1904": "三原", "1905": "浦西", "1906": "浦添",
@@ -173,11 +173,7 @@
 
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    isProcessing = true; 
-    
-    if (html5QrCode) {
-      try { html5QrCode.pause(); } catch(e) {}
-    }
+    isProcessing = true; // 即座にロック
     
     const rawCode = String(decodedText).trim();
     const digitsOnly = rawCode.replace(/[^0-9]/g, '');
@@ -227,14 +223,12 @@
 
       currentScanCode = found.code;
 
-      // 💡 自動発注をクリアしてから実績を取りに行く
       updateViewByStore(true);
       fetchProductHistory(found.code);
     } else {
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
         document.getElementById('status').innerText = "バーコードにかざしてください";
-        if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} }
         isProcessing = false; 
       }, 1500);
     }
@@ -246,7 +240,7 @@
     
     const storeVal = document.getElementById("store-filter").value;
     
-    // ① 自動発注データの描画更新（ゼロ埋めの揺れをすべて吸収）
+    // ① 自動発注データの描画更新
     let aoData = { aisle: "-", max: "-", point: "-" };
     if (storeVal !== "ALL") {
       const cleanStore = storeVal.replace(/^0+/, ''); // 1704等
@@ -256,14 +250,20 @@
         const c1 = currentScanCode;
         const c2 = String(Number(currentScanCode));
         const c3 = currentScanCode.padStart(13, '0');
-        aoData = aoStoreData[c1] || aoStoreData[c2] || aoStoreData[c3] || { aisle: "-", max: "-", point: "-" };
+        
+        let instore13 = null;
+        if (c3.startsWith("02") || c3.startsWith("2")) {
+          instore13 = c3.substring(0, 8) + "00000"; 
+        }
+
+        aoData = aoStoreData[c1] || aoStoreData[c2] || aoStoreData[c3] || (instore13 && aoStoreData[instore13]) || (instore13 && aoStoreData[String(Number(instore13))]) || { aisle: "-", max: "-", point: "-" };
       }
     }
-    document.getElementById("ao-aisle").innerText = aoData.aisle;
-    document.getElementById("ao-max").innerText = aoData.max;
-    document.getElementById("ao-point").innerText = aoData.point;
+    document.getElementById("ao-aisle").innerText = aoData.aisle || "-";
+    document.getElementById("ao-max").innerText = aoData.max || "-";
+    document.getElementById("ao-point").innerText = aoData.point || "-";
 
-    // ② 実績テーブルの描画更新（キャッシュがあれば）
+    // ② 実績テーブルの描画更新
     if (!skipHistoryRender && currentHistoryMap) {
       let targetHistory = null;
       if (currentHistoryMap[storeVal]) {
@@ -273,7 +273,6 @@
         if (currentHistoryMap[paddedStore]) {
           targetHistory = currentHistoryMap[paddedStore];
         } else {
-          // ゼロを取り除いて一致するキーを探す
           const keys = Object.keys(currentHistoryMap);
           const matchKey = keys.find(k => k.replace(/^0+/, '') === storeVal.replace(/^0+/, ''));
           if (matchKey) {
@@ -282,7 +281,6 @@
         }
       }
 
-      // 💡 データが全く無い店舗を選んだ場合、ALLの日付列を使って「0」の配列を作成する
       if (!targetHistory && currentHistoryMap["ALL"]) {
         targetHistory = currentHistoryMap["ALL"].map(item => ({
           displayDate: item.displayDate,
@@ -309,7 +307,8 @@
         if (data.success && data.historyMap) {
           currentHistoryMap = data.historyMap;
           
-          // 店舗と自動発注・実績を連動させて再描画
+          // 💡 ここでのプルダウン書き換えロジックを完全に削除
+          // 選択肢は初期化時の storeNameMap を維持し続けます
           updateViewByStore();
           
           historyStatus.style.display = "none";
@@ -324,6 +323,7 @@
   }
 
   function renderHistoryTable(historyArray) {
+    if (!historyArray) return;
     const headerTr = document.getElementById('history-header');
     const qtyTr = document.getElementById('history-qty-row');
     const salesTr = document.getElementById('history-sales-row');
@@ -331,8 +331,6 @@
     headerTr.innerHTML = "<th style='position: sticky; left: 0; z-index: 2; border-right: 2px solid #cbd5e1;'>日付</th>";
     qtyTr.innerHTML = "<td class='row-title'>数量(点)</td>";
     salesTr.innerHTML = "<td class='row-title'>売上(円)</td>";
-
-    if (!historyArray || historyArray.length === 0) return;
 
     historyArray.forEach(item => {
       const th = document.createElement('th');
@@ -351,18 +349,14 @@
     });
   }
 
-  // 💡 次をスキャンボタン：初めに戻さず、カメラを起動した状態で再開する
+  // 💡 次をスキャンボタン：カメラを停止せずバックグラウンドで動かし続ける
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
-    document.getElementById('start-btn').style.display = 'none'; // ボタンは隠したまま
-    document.getElementById('reader').style.display = 'flex'; // カメラ領域を表示
+    document.getElementById('reader').style.display = 'flex';
     document.getElementById('status').innerText = "バーコードにかざしてください";
     
-    // UIが切り替わってからカメラの認識を再開（誤爆防止）
+    // UIが切り替わってから安全にスキャンロックを解除
     setTimeout(() => {
-      if (html5QrCode) {
-        try { html5QrCode.resume(); } catch(e) {}
-      }
       isProcessing = false; 
     }, 500);
   }
