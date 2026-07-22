@@ -88,32 +88,23 @@
 </div>
 
 <script>
-  // ★GASのURLを指定
+  // ★GASのURLに書き換えてください
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
   let itemMasterMap = {};
   
-  // 💡 初期状態はロックして誤爆を完全に防ぐ
   let isProcessing = true; 
   let currentScanCode = null;
   let currentHistoryMap = {}; 
+  let appStoreList = [];
 
-  // 💡 ご指定いただいた店舗名の固定辞書（マップ）
-  const storeNameMap = {
-    "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
-    "1901": "普天間", "1904": "三原", "1905": "浦西", "1906": "浦添",
-    "1908": "西町", "1909": "大平", "1910": "食品館", "1911": "豊崎"
-  };
-
-  // 💡 店舗コードから正確な名前に変換する関数
+  // 店舗名を綺麗に変換する関数
   function getStoreName(code) {
     if (code === "ALL") return "全店舗合計";
-    const cleanCode = code.replace(/^0+/, ''); // 先頭の0を除去して検索
-    if (storeNameMap[cleanCode]) {
-      return storeNameMap[cleanCode] + "店";
-    }
-    return code + "店"; // 辞書にない場合はコードをそのまま表示
+    const cleanCode = code.replace(/^0+/, '');
+    const found = appStoreList.find(s => s.code === code || s.code === cleanCode || s.code.replace(/^0+/, '') === cleanCode);
+    return found ? found.name.replace("店", "") + "店" : code + "店";
   }
 
   window.addEventListener('DOMContentLoaded', () => {
@@ -122,6 +113,7 @@
       .then(data => {
         if (data.success && data.itemMasterMap) {
           itemMasterMap = data.itemMasterMap;
+          appStoreList = data.storeList || [];
 
           document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
           document.getElementById('start-btn').style.display = 'block';
@@ -139,7 +131,6 @@
     document.getElementById('reader').style.display = 'flex';
     document.getElementById('status').innerText = "カメラを起動中...";
     
-    // 💡 カメラが完全に立ち上がるまで読み込みをブロック
     isProcessing = true; 
 
     if (!html5QrCode) {
@@ -150,7 +141,6 @@
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .then(() => {
-        // カメラが正常に起動してからロックを解除
         document.getElementById('status').innerText = "バーコードにかざしてください";
         isProcessing = false;
       })
@@ -161,7 +151,7 @@
 
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    isProcessing = true; // 💡 スキャンした瞬間に即座にロックをかける！
+    isProcessing = true; // 💡 スキャンした瞬間に即座にロックをかける
     
     // 💡 裏で別のコードを読まないようにカメラ映像を一時停止
     if (html5QrCode) {
@@ -172,8 +162,16 @@
     const digitsOnly = rawCode.replace(/[^0-9]/g, '');
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
-
-    let searchCodes = [digitsOnly, numOnly, padded13, rawCode];
+    
+    // 💡 短縮JAN（8桁）や輸入UPC（12桁）などあらゆる桁の揺れを吸収する候補を生成
+    let searchCodes = [
+      digitsOnly, 
+      numOnly, 
+      padded13, 
+      rawCode,
+      digitsOnly.padStart(8, '0'),  // 短縮JANとしてのゼロ埋め
+      digitsOnly.padStart(12, '0')  // UPCコードとしてのゼロ埋め
+    ];
 
     // インストアコード（不定貫）の特別対応
     if (padded13.startsWith("02") || padded13.startsWith("2")) {
@@ -217,13 +215,12 @@
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
         document.getElementById('status').innerText = "バーコードにかざしてください";
-        if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} } // カメラ再開
-        isProcessing = false; // 再スキャン許可
+        if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} }
+        isProcessing = false; 
       }, 1500);
     }
   }
 
-  // フロント金庫からの瞬時切り替え
   function refetchHistory() {
     const storeFilter = document.getElementById("store-filter").value;
     if (currentHistoryMap && currentHistoryMap[storeFilter]) {
@@ -302,24 +299,20 @@
     });
   }
 
+  // 💡 「次をスキャン」を押した時の安全な再開処理
   function resumeScan() {
-    // 💡 画面を閉じてボタンを再表示
+    // まず画面上の要素をカメラモードに切り替える
     document.getElementById('result-box').style.display = "none";
-    document.getElementById('start-btn').style.display = 'block';
-    document.getElementById('reader').style.display = 'none';
-    document.getElementById('status').innerText = "✅ 準備完了！カメラを起動してください";
+    document.getElementById('reader').style.display = 'flex';
+    document.getElementById('status').innerText = "バーコードにかざしてください";
     
-    // 💡 ここでは「isProcessing = false」にはせず、強固にロックしたままにする！
-    // 次に「カメラ起動（startScan）」を押すまで絶対に反応しません。
-
-    if (html5QrCode) {
-      try {
-        html5QrCode.stop().then(() => {
-          html5QrCode.clear();
-          html5QrCode = null; // カメラをシステムから完全にシャットダウン
-        }).catch(err => { html5QrCode = null; });
-      } catch(e) { html5QrCode = null; }
-    }
+    // 💡 画面が切り替わってから少しだけディレイ（0.5秒）を入れてカメラを再開（誤爆防止）
+    setTimeout(() => {
+      if (html5QrCode) {
+        try { html5QrCode.resume(); } catch(e) {}
+      }
+      isProcessing = false; // ディレイ後にロック解除
+    }, 500);
   }
 </script>
 
