@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>商品詳細＆実績照会システム</title>
   <script src="https://unpkg.com/html5-qrcode"></script>
+  <!-- OCRライブラリ (Tesseract.js) の読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 8px; background: #f1f5f9; text-align: center; color: #1e293b; overflow-x: hidden; }
@@ -12,13 +14,18 @@
     h2 { font-size: 1.05em; color: #0f172a; margin: 0 0 10px 0; }
     
     /* カメラ表示領域 */
-    #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; }
+    #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 8px; background: #000; display: flex; align-items: center; justify-content: center; position: relative; }
     #reader video { object-fit: cover !important; height: 220px !important; }
     
+    /* OCR・手入力切替タブ / ボタン */
+    .mode-switch-group { display: flex; gap: 6px; margin-bottom: 8px; display: none; }
+    .btn-mode { flex: 1; background: #475569; color: white; border: none; padding: 8px; font-size: 0.85rem; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    .btn-mode.active { background: #0284c7; }
+
     /* 手入力・テキストスキャン入力フォーム */
-    .manual-input-group { display: flex; gap: 8px; margin-bottom: 10px; display: none; }
+    .manual-input-group { display: flex; gap: 6px; margin-bottom: 10px; display: none; }
     .manual-input-group input { flex: 1; padding: 10px; font-size: 1rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; -webkit-appearance: none; }
-    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; white-space: nowrap; }
+    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 14px; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; white-space: nowrap; }
 
     .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; width: 100%; }
     .detail-grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8em; margin-bottom: 10px; }
@@ -57,9 +64,15 @@
   <!-- カメラ領域 -->
   <div id="reader" style="display:none;"></div>
   
-  <!-- 手入力 / スマホOCR連携フォーム -->
+  <!-- モード切替ボタン (バーコード優先 / OCR文字読み取り) -->
+  <div id="mode-switch-group" class="mode-switch-group">
+    <button id="btn-mode-bc" class="btn-mode active" onclick="switchMode('barcode')">📷 バーコード自動スキャン</button>
+    <button id="btn-mode-ocr" class="btn-mode" onclick="switchMode('ocr')">🔍 文字(数字)をスキャン認識</button>
+  </div>
+
+  <!-- 手入力フォーム -->
   <div id="manual-input-group" class="manual-input-group">
-    <input type="tel" id="manual-code" placeholder="コード入力 / スキャンテキスト" onkeypress="handleKeyPress(event)">
+    <input type="tel" id="manual-code" placeholder="コードを直接入力" onkeypress="handleKeyPress(event)">
     <button type="button" onclick="submitManualInput()">検索</button>
   </div>
 
@@ -127,6 +140,8 @@
   let isProcessing = true; 
   let currentScanCode = null;
   let currentHistoryMap = {}; 
+  let currentMode = "barcode"; // barcode または ocr
+  let ocrTimer = null;
 
   const storeNameMap = {
     "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
@@ -162,6 +177,7 @@
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'flex';
+    document.getElementById('mode-switch-group').style.display = 'flex';
     document.getElementById('manual-input-group').style.display = 'flex';
     document.getElementById('status').innerText = "カメラ起動中...";
     
@@ -175,13 +191,62 @@
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .then(() => {
-        document.getElementById('status').innerText = "バーコードにかざすか、コードを入力して検索してください";
+        document.getElementById('status').innerText = "バーコードにかざすか、文字(数字)にかざしてください";
         isProcessing = false;
+        startOcrLoop(); // 💡 OCR読み取りループ開始
       })
       .catch(err => { 
-        document.getElementById('status').innerText = "カメラ未起動（コード入力枠より検索できます）"; 
+        document.getElementById('status').innerText = "カメラ未起動（コード直接入力が可能です）"; 
         isProcessing = false; 
       });
+  }
+
+  function switchMode(mode) {
+    currentMode = mode;
+    document.getElementById('btn-mode-bc').classList.toggle('active', mode === 'barcode');
+    document.getElementById('btn-mode-ocr').classList.toggle('active', mode === 'ocr');
+    
+    if (mode === 'ocr') {
+      document.getElementById('status').innerText = "🔍 文字(数字)にかざしてください...解析中";
+    } else {
+      document.getElementById('status').innerText = "📷 バーコードにかざしてください";
+    }
+  }
+
+  /* 💡 アプリ内リアルタイムOCR文字解析ループ */
+  function startOcrLoop() {
+    if (ocrTimer) clearInterval(ocrTimer);
+    ocrTimer = setInterval(async () => {
+      if (isProcessing || currentMode !== 'ocr') return;
+
+      const videoElement = document.querySelector("#reader video");
+      if (!videoElement || videoElement.readyState !== 4) return;
+
+      try {
+        // カメラの現在のコマ（フレーム）をキャプチャ
+        const canvas = document.createElement("canvas");
+        canvas.width = videoElement.videoWidth;
+        canvas.height = videoElement.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+        // OCR解析（数字専用モード）
+        const result = await Tesseract.recognize(canvas, 'eng', {
+          tessedit_char_whitelist: '0123456789'
+        });
+
+        const text = result.data.text ? result.data.text.trim() : "";
+        const matches = text.match(/\d{8,13}/g);
+
+        if (matches && matches.length > 0 && !isProcessing && currentMode === 'ocr') {
+          let foundCode = matches.find(m => m.length === 13) || matches[0];
+          document.getElementById('status').innerText = `🔍 検出コード: ${foundCode}`;
+          processCodeSearch(foundCode);
+        }
+      } catch (e) {
+        console.warn("OCR解析エラー:", e);
+      }
+    }, 1200); // 1.2秒周期でカメラ枠の文字をチェック
   }
 
   function handleKeyPress(e) {
@@ -190,16 +255,14 @@
     }
   }
 
-  /* 💡 検索ボタン押下またはEnter時に実行する確実な検索ハンドラ */
   function submitManualInput() {
     const manualInput = document.getElementById("manual-code");
     const rawVal = manualInput.value ? manualInput.value.trim() : "";
     if (!rawVal) return;
 
-    manualInput.blur(); // キーボードを閉じる
+    manualInput.blur();
     isProcessing = false;
 
-    // 入力された文字列（またはOCRテキスト）から連続する8〜13桁の数字を自動ピックアップ
     const matches = rawVal.match(/\d{8,13}/g);
     if (matches && matches.length > 0) {
       let bestMatch = matches.find(m => m.length === 13) || matches[0];
@@ -211,10 +274,12 @@
 
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    processCodeSearch(decodedText);
+    if (currentMode === 'barcode') {
+      processCodeSearch(decodedText);
+    }
   }
 
-  /* 💡 コード照合エンジン（8桁/12桁/13桁/不定貫対応） */
+  /* 💡 照会処理 */
   function processCodeSearch(inputText) {
     isProcessing = true; 
     
@@ -257,6 +322,7 @@
 
     if (found) {
       document.getElementById('reader').style.display = 'none';
+      document.getElementById('mode-switch-group').style.display = 'none';
       document.getElementById('manual-input-group').style.display = 'none';
       
       document.getElementById('res-scan-code').innerText = rawCode;
@@ -285,7 +351,7 @@
     } else {
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
-        document.getElementById('status').innerText = "バーコードにかざすか、コードを入力して検索してください";
+        document.getElementById('status').innerText = "バーコードにかざすか、文字(数字)にかざしてください";
         if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} }
         isProcessing = false; 
       }, 1500);
@@ -400,9 +466,10 @@
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
     document.getElementById('reader').style.display = 'flex';
+    document.getElementById('mode-switch-group').style.display = 'flex';
     document.getElementById('manual-input-group').style.display = 'flex';
     document.getElementById('manual-code').value = ""; 
-    document.getElementById('status').innerText = "バーコードにかざすか、コードを入力して検索してください";
+    document.getElementById('status').innerText = "バーコードにかざすか、文字(数字)にかざしてください";
     
     setTimeout(() => {
       if (html5QrCode) {
