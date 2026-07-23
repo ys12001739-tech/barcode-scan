@@ -12,13 +12,13 @@
     h2 { font-size: 1.05em; color: #0f172a; margin: 0 0 10px 0; }
     
     /* カメラ領域 */
-    #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; }
+    #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; position: relative; }
     #reader video { object-fit: cover !important; height: 220px !important; }
     
     /* 手入力・OCR入力フォーム */
     .manual-input-group { display: flex; gap: 8px; margin-bottom: 10px; display: none; }
-    .manual-input-group input { flex: 1; padding: 10px; font-size: 1rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; -webkit-appearance: none; }
-    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    .manual-input-group input { flex: 1; padding: 10px; font-size: 0.95rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; -webkit-appearance: none; }
+    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 0.95rem; border-radius: 6px; font-weight: bold; cursor: pointer; white-space: nowrap; }
 
     .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; width: 100%; }
     .detail-grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8em; margin-bottom: 10px; }
@@ -57,9 +57,9 @@
   <!-- カメラ領域 -->
   <div id="reader" style="display:none;"></div>
   
-  <!-- 💡 手入力・OCR入力フォーム（Enterキー対応） -->
+  <!-- 手入力・OCR入力フォーム（Enter対応） -->
   <div id="manual-input-group" class="manual-input-group">
-    <input type="tel" id="manual-code" placeholder="商品コード入力 (OCR可)" onkeypress="handleKeyPress(event)">
+    <input type="text" id="manual-code" placeholder="コード入力またはテキストスキャン" onkeypress="handleKeyPress(event)">
     <button type="button" onclick="submitManualInput()">検索</button>
   </div>
 
@@ -68,15 +68,14 @@
   <!-- 結果表示領域 -->
   <div id="result-box" class="result-box">
     
-    <!-- 🏪 店舗絞り込みフィルタ -->
+    <!-- 店舗絞り込みフィルタ -->
     <div class="filter-group">
       <div style="font-size:0.85em; font-weight:bold; color:#1e40af;">🏪 参照店舗の選択</div>
       <select id="store-filter" onchange="updateViewByStore()">
-        <!-- JSで初期化されます -->
       </select>
     </div>
 
-    <!-- 🛒 自動発注データ領域 -->
+    <!-- 自動発注データ領域 -->
     <div class="auto-order-group">
       <div style="font-weight:bold; color:#065f46; margin-bottom:4px;">🛒 店舗ごとの自動発注情報</div>
       <table class="auto-order-grid">
@@ -176,56 +175,61 @@
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .then(() => {
-        document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
+        document.getElementById('status').innerText = "バーコードにかざすか、手入力・OCR入力してください";
         isProcessing = false;
       })
       .catch(err => { 
         document.getElementById('status').innerText = "カメラエラー: " + err; 
-        isProcessing = false; // エラー時も入力できるように解放
+        isProcessing = false; 
       });
   }
 
-  // 💡 Enterキーが押された時の処理
   function handleKeyPress(e) {
     if (e.key === 'Enter') {
       submitManualInput();
     }
   }
 
-  // 💡 手入力・OCR検索の実行関数（カメラのロック状態に関わらず強制実行）
+  // 💡 OCR・手入力の実行処理（文章や複数の数字から商品コード候補をスマート判別）
   function submitManualInput() {
     const manualInput = document.getElementById("manual-code");
     const rawVal = manualInput.value ? manualInput.value.trim() : "";
     if (!rawVal) return;
 
-    // キーボードを閉じる
     manualInput.blur();
-
-    // 強制的にスキャンロックを解除して検索を実行
     isProcessing = false;
-    processCodeSearch(rawVal);
+
+    // 💡 読み取った文字列の中から「8桁〜13桁の連続した数字」を自動抽出する（OCRノイズ除去）
+    const matches = rawVal.match(/\d{8,13}/g);
+    
+    if (matches && matches.length > 0) {
+      // 一番JANコードっぽい候補（13桁優先、無ければ最初に見つかった長めの数字）
+      let bestMatch = matches.find(m => m.length === 13) || matches[0];
+      processCodeSearch(bestMatch);
+    } else {
+      // 連続する数字が見つからなければ全体から数字だけを抽出して試す
+      processCodeSearch(rawVal);
+    }
   }
 
-  // カメラからの自動スキャン成功時
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
     processCodeSearch(decodedText);
   }
 
-  // 💡 統合コード検索ロジック（カメラ・手入力共通）
+  // 💡 統合検索ロジック（カメラ・OCR・手入力共通）
   function processCodeSearch(inputText) {
-    isProcessing = true; // 二重実行防止
+    isProcessing = true; 
     
-    // カメラが動いていれば一時停止
     if (html5QrCode) {
       try { html5QrCode.pause(); } catch(e) {}
     }
     
     const rawCode = String(inputText).trim();
-    const digitsOnly = rawCode.replace(/[^0-9]/g, ''); // 数字だけを抽出
+    const digitsOnly = rawCode.replace(/[^0-9]/g, ''); 
     
     if (!digitsOnly) {
-      document.getElementById('status').innerText = "⚠️ 正しい数字コードを入力してください";
+      document.getElementById('status').innerText = "⚠️ 正しい商品コード（数字）が検出できませんでした";
       isProcessing = false;
       return;
     }
@@ -403,7 +407,7 @@
     document.getElementById('result-box').style.display = "none";
     document.getElementById('reader').style.display = 'flex';
     document.getElementById('manual-input-group').style.display = 'flex';
-    document.getElementById('manual-code').value = ""; // 入力欄をクリア
+    document.getElementById('manual-code').value = ""; 
     document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
     
     setTimeout(() => {
