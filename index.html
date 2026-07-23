@@ -11,9 +11,15 @@
     .card { background: white; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); width: 100%; max-width: 500px; margin: 0 auto; overflow: hidden; }
     h2 { font-size: 1.05em; color: #0f172a; margin: 0 0 10px 0; }
     
+    /* カメラ領域 */
     #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; }
     #reader video { object-fit: cover !important; height: 220px !important; }
     
+    /* 💡 手入力・OCR入力フォーム */
+    .manual-input-group { display: flex; gap: 8px; margin-bottom: 10px; display: none; }
+    .manual-input-group input { flex: 1; padding: 10px; font-size: 1rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; }
+    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; }
+
     .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; width: 100%; }
     .detail-grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8em; margin-bottom: 10px; }
     .detail-grid th { background: #e2e8f0; color: #334155; text-align: left; padding: 6px; width: 35%; border: 1px solid #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -47,13 +53,22 @@
   <h2>無音スキャナー（詳細＆実績照会）</h2>
   
   <div id="status">⚡️ マスタ初期化中...</div>
+  
+  <!-- カメラ領域 -->
   <div id="reader" style="display:none;"></div>
   
+  <!-- 💡 OCR・手入力フォーム（スマホのテキストスキャン対応） -->
+  <div id="manual-input-group" class="manual-input-group">
+    <input type="number" id="manual-code" placeholder="商品コード入力 (OCR可)">
+    <button onclick="executeManualSearch()">検索</button>
+  </div>
+
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
 
+  <!-- 結果表示領域 -->
   <div id="result-box" class="result-box">
     
-    <!-- 🏪 店舗絞り込みフィルタ（ハードコード固定） -->
+    <!-- 🏪 店舗絞り込みフィルタ -->
     <div class="filter-group">
       <div style="font-size:0.85em; font-weight:bold; color:#1e40af;">🏪 参照店舗の選択</div>
       <select id="store-filter" onchange="updateViewByStore()">
@@ -72,8 +87,8 @@
     </div>
 
     <table class="detail-grid">
-      <tr><th>スキャンコード</th><td id="res-scan-code" class="val-highlight" style="color:#64748b;">-</td></tr>
-      <tr><th>マスタ登録JAN</th><td id="res-code" class="val-highlight">-</td></tr>
+      <tr><th>読取コード</th><td id="res-scan-code" class="val-highlight" style="color:#64748b;">-</td></tr>
+      <tr><th>マスタキー</th><td id="res-code" class="val-highlight">-</td></tr>
       <tr><th>商品名</th><td id="res-name">-</td></tr>
       <tr><th>メーカー名</th><td id="res-maker">-</td></tr>
       <tr><th>規格</th><td id="res-spec">-</td></tr>
@@ -115,7 +130,7 @@
   let currentScanCode = null;
   let currentHistoryMap = {}; 
 
-  // 💡 店舗名を直接コードで指定（勝手にリセットされないように固定）
+  // 店舗名を固定
   const storeNameMap = {
     "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
     "1901": "普天間", "1904": "三原", "1905": "浦西", "1906": "浦添",
@@ -123,7 +138,6 @@
   };
 
   window.addEventListener('DOMContentLoaded', () => {
-    // 💡 店舗プルダウンの構築
     const storeFilter = document.getElementById("store-filter");
     storeFilter.innerHTML = '<option value="ALL">全店舗合計</option>';
     Object.keys(storeNameMap).forEach(code => {
@@ -151,6 +165,7 @@
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'flex';
+    document.getElementById('manual-input-group').style.display = 'flex'; // 手入力フォーム表示
     document.getElementById('status').innerText = "カメラを起動中...";
     
     isProcessing = true; 
@@ -163,7 +178,7 @@
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .then(() => {
-        document.getElementById('status').innerText = "バーコードにかざしてください";
+        document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
         isProcessing = false;
       })
       .catch(err => { 
@@ -171,24 +186,40 @@
       });
   }
 
+  // 💡 手入力・OCRボタンが押された時の処理
+  function executeManualSearch() {
+    const manualVal = document.getElementById("manual-code").value;
+    if (!manualVal) return;
+    onScanSuccess(manualVal);
+  }
+
+  // 💡 カメラ・手入力共通の検索ロジック
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
     isProcessing = true; // 即座にロック
+    
+    if (html5QrCode) {
+      try { html5QrCode.pause(); } catch(e) {}
+    }
     
     const rawCode = String(decodedText).trim();
     const digitsOnly = rawCode.replace(/[^0-9]/g, '');
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
     
+    // 💡 どんな桁数でも確実にヒットさせる「無敵の検索配列」
     let searchCodes = [
-      digitsOnly, numOnly, padded13, rawCode,
-      digitsOnly.padStart(8, '0'), digitsOnly.padStart(12, '0')
+      numOnly, // 先頭のゼロを落とした数値（8桁・12桁・13桁すべてに最強）
+      digitsOnly, 
+      padded13, 
+      rawCode
     ];
 
+    // 不定貫（インストアコード）対応
     if (padded13.startsWith("02") || padded13.startsWith("2")) {
       const instore13 = padded13.substring(0, 8) + "00000"; 
+      searchCodes.push(String(Number(instore13))); // 不定貫のゼロ落ち
       searchCodes.push(instore13);
-      searchCodes.push(String(Number(instore13)));
     }
 
     let found = null;
@@ -201,6 +232,7 @@
 
     if (found) {
       document.getElementById('reader').style.display = 'none';
+      document.getElementById('manual-input-group').style.display = 'none'; // 入力欄を隠す
       
       document.getElementById('res-scan-code').innerText = rawCode;
       document.getElementById('res-code').innerText = found.code;
@@ -228,22 +260,22 @@
     } else {
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
-        document.getElementById('status').innerText = "バーコードにかざしてください";
+        document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
+        if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} }
         isProcessing = false; 
       }, 1500);
     }
   }
 
-  // 💡 プルダウン変更時 ＆ スキャン時に呼ばれる統合関数
   function updateViewByStore(skipHistoryRender = false) {
     if (!currentScanCode) return;
     
     const storeVal = document.getElementById("store-filter").value;
     
-    // ① 自動発注データの描画更新
+    // 自動発注データの描画
     let aoData = { aisle: "-", max: "-", point: "-" };
     if (storeVal !== "ALL") {
-      const cleanStore = storeVal.replace(/^0+/, ''); // 1704等
+      const cleanStore = storeVal.replace(/^0+/, ''); 
       const aoStoreData = autoOrderMap[cleanStore] || autoOrderMap[storeVal] || autoOrderMap["00" + cleanStore];
       
       if (aoStoreData) {
@@ -256,28 +288,26 @@
           instore13 = c3.substring(0, 8) + "00000"; 
         }
 
-        aoData = aoStoreData[c1] || aoStoreData[c2] || aoStoreData[c3] || (instore13 && aoStoreData[instore13]) || (instore13 && aoStoreData[String(Number(instore13))]) || { aisle: "-", max: "-", point: "-" };
+        aoData = aoStoreData[c1] || aoStoreData[c2] || aoStoreData[c3] || (instore13 && aoStoreData[String(Number(instore13))]) || { aisle: "-", max: "-", point: "-" };
       }
     }
     document.getElementById("ao-aisle").innerText = aoData.aisle || "-";
     document.getElementById("ao-max").innerText = aoData.max || "-";
     document.getElementById("ao-point").innerText = aoData.point || "-";
 
-    // ② 実績テーブルの描画更新
+    // 実績テーブルの描画
     if (!skipHistoryRender && currentHistoryMap) {
       let targetHistory = null;
       if (currentHistoryMap[storeVal]) {
         targetHistory = currentHistoryMap[storeVal];
       } else {
-        const paddedStore = storeVal.padStart(6, '0'); // 001704等
+        const paddedStore = storeVal.padStart(6, '0');
         if (currentHistoryMap[paddedStore]) {
           targetHistory = currentHistoryMap[paddedStore];
         } else {
           const keys = Object.keys(currentHistoryMap);
           const matchKey = keys.find(k => k.replace(/^0+/, '') === storeVal.replace(/^0+/, ''));
-          if (matchKey) {
-            targetHistory = currentHistoryMap[matchKey];
-          }
+          if (matchKey) targetHistory = currentHistoryMap[matchKey];
         }
       }
 
@@ -288,7 +318,6 @@
           sales: 0
         }));
       }
-
       renderHistoryTable(targetHistory || []);
     }
   }
@@ -306,11 +335,7 @@
       .then(data => {
         if (data.success && data.historyMap) {
           currentHistoryMap = data.historyMap;
-          
-          // 💡 ここでのプルダウン書き換えロジックを完全に削除
-          // 選択肢は初期化時の storeNameMap を維持し続けます
           updateViewByStore();
-          
           historyStatus.style.display = "none";
           tableContainer.style.display = "block";
         } else {
@@ -349,14 +374,18 @@
     });
   }
 
-  // 💡 次をスキャンボタン：カメラを停止せずバックグラウンドで動かし続ける
+  // 💡 次をスキャンボタン：カメラを再表示し、そのままスキャンを再開する
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
     document.getElementById('reader').style.display = 'flex';
-    document.getElementById('status').innerText = "バーコードにかざしてください";
+    document.getElementById('manual-input-group').style.display = 'flex';
+    document.getElementById('manual-code').value = ""; // 入力欄をクリア
+    document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
     
-    // UIが切り替わってから安全にスキャンロックを解除
     setTimeout(() => {
+      if (html5QrCode) {
+        try { html5QrCode.resume(); } catch(e) {}
+      }
       isProcessing = false; 
     }, 500);
   }
