@@ -15,9 +15,9 @@
     #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; }
     #reader video { object-fit: cover !important; height: 220px !important; }
     
-    /* 💡 手入力・OCR入力フォーム */
+    /* 手入力・OCR入力フォーム */
     .manual-input-group { display: flex; gap: 8px; margin-bottom: 10px; display: none; }
-    .manual-input-group input { flex: 1; padding: 10px; font-size: 1rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; }
+    .manual-input-group input { flex: 1; padding: 10px; font-size: 1rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; -webkit-appearance: none; }
     .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; }
 
     .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; width: 100%; }
@@ -57,10 +57,10 @@
   <!-- カメラ領域 -->
   <div id="reader" style="display:none;"></div>
   
-  <!-- 💡 OCR・手入力フォーム（スマホのテキストスキャン対応） -->
+  <!-- 💡 手入力・OCR入力フォーム（Enterキー対応） -->
   <div id="manual-input-group" class="manual-input-group">
-    <input type="number" id="manual-code" placeholder="商品コード入力 (OCR可)">
-    <button onclick="executeManualSearch()">検索</button>
+    <input type="tel" id="manual-code" placeholder="商品コード入力 (OCR可)" onkeypress="handleKeyPress(event)">
+    <button type="button" onclick="submitManualInput()">検索</button>
   </div>
 
   <button id="start-btn" class="btn-main" style="display:none;" onclick="startScan()">📷 カメラ起動（スキャン開始）</button>
@@ -119,7 +119,6 @@
 </div>
 
 <script>
-  // ★GASのURLを指定
   const GAS_URL = "https://script.google.com/macros/s/AKfycbwutOT1LXPm8FGtY5auzTMQbMBa8hyQd7sP8Ku5QLMgmwMoi2FShslBF6DNyiEpI7dC/exec";
   
   let html5QrCode;
@@ -130,7 +129,6 @@
   let currentScanCode = null;
   let currentHistoryMap = {}; 
 
-  // 店舗名を固定
   const storeNameMap = {
     "1704": "首里", "1898": "栄町", "1899": "国場", "1900": "天久",
     "1901": "普天間", "1904": "三原", "1905": "浦西", "1906": "浦添",
@@ -165,7 +163,7 @@
   function startScan() {
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'flex';
-    document.getElementById('manual-input-group').style.display = 'flex'; // 手入力フォーム表示
+    document.getElementById('manual-input-group').style.display = 'flex';
     document.getElementById('status').innerText = "カメラを起動中...";
     
     isProcessing = true; 
@@ -183,33 +181,60 @@
       })
       .catch(err => { 
         document.getElementById('status').innerText = "カメラエラー: " + err; 
+        isProcessing = false; // エラー時も入力できるように解放
       });
   }
 
-  // 💡 手入力・OCRボタンが押された時の処理
-  function executeManualSearch() {
-    const manualVal = document.getElementById("manual-code").value;
-    if (!manualVal) return;
-    onScanSuccess(manualVal);
+  // 💡 Enterキーが押された時の処理
+  function handleKeyPress(e) {
+    if (e.key === 'Enter') {
+      submitManualInput();
+    }
   }
 
-  // 💡 カメラ・手入力共通の検索ロジック
+  // 💡 手入力・OCR検索の実行関数（カメラのロック状態に関わらず強制実行）
+  function submitManualInput() {
+    const manualInput = document.getElementById("manual-code");
+    const rawVal = manualInput.value ? manualInput.value.trim() : "";
+    if (!rawVal) return;
+
+    // キーボードを閉じる
+    manualInput.blur();
+
+    // 強制的にスキャンロックを解除して検索を実行
+    isProcessing = false;
+    processCodeSearch(rawVal);
+  }
+
+  // カメラからの自動スキャン成功時
   function onScanSuccess(decodedText) {
     if (isProcessing) return;
-    isProcessing = true; // 即座にロック
+    processCodeSearch(decodedText);
+  }
+
+  // 💡 統合コード検索ロジック（カメラ・手入力共通）
+  function processCodeSearch(inputText) {
+    isProcessing = true; // 二重実行防止
     
+    // カメラが動いていれば一時停止
     if (html5QrCode) {
       try { html5QrCode.pause(); } catch(e) {}
     }
     
-    const rawCode = String(decodedText).trim();
-    const digitsOnly = rawCode.replace(/[^0-9]/g, '');
+    const rawCode = String(inputText).trim();
+    const digitsOnly = rawCode.replace(/[^0-9]/g, ''); // 数字だけを抽出
+    
+    if (!digitsOnly) {
+      document.getElementById('status').innerText = "⚠️ 正しい数字コードを入力してください";
+      isProcessing = false;
+      return;
+    }
+
     const numOnly = String(Number(digitsOnly || '0'));
     const padded13 = digitsOnly.padStart(13, '0');
     
-    // 💡 どんな桁数でも確実にヒットさせる「無敵の検索配列」
     let searchCodes = [
-      numOnly, // 先頭のゼロを落とした数値（8桁・12桁・13桁すべてに最強）
+      numOnly, 
       digitsOnly, 
       padded13, 
       rawCode
@@ -218,7 +243,7 @@
     // 不定貫（インストアコード）対応
     if (padded13.startsWith("02") || padded13.startsWith("2")) {
       const instore13 = padded13.substring(0, 8) + "00000"; 
-      searchCodes.push(String(Number(instore13))); // 不定貫のゼロ落ち
+      searchCodes.push(String(Number(instore13))); 
       searchCodes.push(instore13);
     }
 
@@ -232,7 +257,7 @@
 
     if (found) {
       document.getElementById('reader').style.display = 'none';
-      document.getElementById('manual-input-group').style.display = 'none'; // 入力欄を隠す
+      document.getElementById('manual-input-group').style.display = 'none';
       
       document.getElementById('res-scan-code').innerText = rawCode;
       document.getElementById('res-code').innerText = found.code;
@@ -272,7 +297,7 @@
     
     const storeVal = document.getElementById("store-filter").value;
     
-    // 自動発注データの描画
+    // 自動発注データ描画
     let aoData = { aisle: "-", max: "-", point: "-" };
     if (storeVal !== "ALL") {
       const cleanStore = storeVal.replace(/^0+/, ''); 
@@ -295,7 +320,7 @@
     document.getElementById("ao-max").innerText = aoData.max || "-";
     document.getElementById("ao-point").innerText = aoData.point || "-";
 
-    // 実績テーブルの描画
+    // 実績テーブル描画
     if (!skipHistoryRender && currentHistoryMap) {
       let targetHistory = null;
       if (currentHistoryMap[storeVal]) {
@@ -374,7 +399,6 @@
     });
   }
 
-  // 💡 次をスキャンボタン：カメラを再表示し、そのままスキャンを再開する
   function resumeScan() {
     document.getElementById('result-box').style.display = "none";
     document.getElementById('reader').style.display = 'flex';
