@@ -11,14 +11,14 @@
     .card { background: white; padding: 12px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); width: 100%; max-width: 500px; margin: 0 auto; overflow: hidden; }
     h2 { font-size: 1.05em; color: #0f172a; margin: 0 0 10px 0; }
     
-    /* カメラ領域 */
-    #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; position: relative; }
+    /* カメラ表示領域 */
+    #reader { width: 100%; max-height: 220px; border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: #000; display: flex; align-items: center; justify-content: center; }
     #reader video { object-fit: cover !important; height: 220px !important; }
     
-    /* 手入力・OCR入力フォーム */
+    /* 手入力・テキストスキャン入力フォーム */
     .manual-input-group { display: flex; gap: 8px; margin-bottom: 10px; display: none; }
-    .manual-input-group input { flex: 1; padding: 10px; font-size: 0.95rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; -webkit-appearance: none; }
-    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 0.95rem; border-radius: 6px; font-weight: bold; cursor: pointer; white-space: nowrap; }
+    .manual-input-group input { flex: 1; padding: 10px; font-size: 1rem; border-radius: 6px; border: 1px solid #cbd5e1; outline: none; -webkit-appearance: none; }
+    .manual-input-group button { background: #0f172a; color: white; border: none; padding: 10px 16px; font-size: 1rem; border-radius: 6px; font-weight: bold; cursor: pointer; white-space: nowrap; }
 
     .result-box { text-align: left; background: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; margin-top: 6px; display: none; width: 100%; }
     .detail-grid { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.8em; margin-bottom: 10px; }
@@ -57,9 +57,9 @@
   <!-- カメラ領域 -->
   <div id="reader" style="display:none;"></div>
   
-  <!-- 手入力・OCR入力フォーム（Enter対応） -->
+  <!-- 手入力 / スマホOCR連携フォーム -->
   <div id="manual-input-group" class="manual-input-group">
-    <input type="text" id="manual-code" placeholder="コード入力またはテキストスキャン" onkeypress="handleKeyPress(event)">
+    <input type="tel" id="manual-code" placeholder="コード入力 / スキャンテキスト" onkeypress="handleKeyPress(event)">
     <button type="button" onclick="submitManualInput()">検索</button>
   </div>
 
@@ -163,7 +163,7 @@
     document.getElementById('start-btn').style.display = 'none';
     document.getElementById('reader').style.display = 'flex';
     document.getElementById('manual-input-group').style.display = 'flex';
-    document.getElementById('status').innerText = "カメラを起動中...";
+    document.getElementById('status').innerText = "カメラ起動中...";
     
     isProcessing = true; 
 
@@ -175,11 +175,11 @@
 
     html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
       .then(() => {
-        document.getElementById('status').innerText = "バーコードにかざすか、手入力・OCR入力してください";
+        document.getElementById('status').innerText = "バーコードにかざすか、コードを入力して検索してください";
         isProcessing = false;
       })
       .catch(err => { 
-        document.getElementById('status').innerText = "カメラエラー: " + err; 
+        document.getElementById('status').innerText = "カメラ未起動（コード入力枠より検索できます）"; 
         isProcessing = false; 
       });
   }
@@ -190,24 +190,21 @@
     }
   }
 
-  // 💡 OCR・手入力の実行処理（文章や複数の数字から商品コード候補をスマート判別）
+  /* 💡 検索ボタン押下またはEnter時に実行する確実な検索ハンドラ */
   function submitManualInput() {
     const manualInput = document.getElementById("manual-code");
     const rawVal = manualInput.value ? manualInput.value.trim() : "";
     if (!rawVal) return;
 
-    manualInput.blur();
+    manualInput.blur(); // キーボードを閉じる
     isProcessing = false;
 
-    // 💡 読み取った文字列の中から「8桁〜13桁の連続した数字」を自動抽出する（OCRノイズ除去）
+    // 入力された文字列（またはOCRテキスト）から連続する8〜13桁の数字を自動ピックアップ
     const matches = rawVal.match(/\d{8,13}/g);
-    
     if (matches && matches.length > 0) {
-      // 一番JANコードっぽい候補（13桁優先、無ければ最初に見つかった長めの数字）
       let bestMatch = matches.find(m => m.length === 13) || matches[0];
       processCodeSearch(bestMatch);
     } else {
-      // 連続する数字が見つからなければ全体から数字だけを抽出して試す
       processCodeSearch(rawVal);
     }
   }
@@ -217,7 +214,7 @@
     processCodeSearch(decodedText);
   }
 
-  // 💡 統合検索ロジック（カメラ・OCR・手入力共通）
+  /* 💡 コード照合エンジン（8桁/12桁/13桁/不定貫対応） */
   function processCodeSearch(inputText) {
     isProcessing = true; 
     
@@ -244,7 +241,6 @@
       rawCode
     ];
 
-    // 不定貫（インストアコード）対応
     if (padded13.startsWith("02") || padded13.startsWith("2")) {
       const instore13 = padded13.substring(0, 8) + "00000"; 
       searchCodes.push(String(Number(instore13))); 
@@ -289,7 +285,7 @@
     } else {
       document.getElementById('status').innerText = "未登録コード: " + rawCode;
       setTimeout(() => { 
-        document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
+        document.getElementById('status').innerText = "バーコードにかざすか、コードを入力して検索してください";
         if (html5QrCode) { try { html5QrCode.resume(); } catch(e){} }
         isProcessing = false; 
       }, 1500);
@@ -301,7 +297,6 @@
     
     const storeVal = document.getElementById("store-filter").value;
     
-    // 自動発注データ描画
     let aoData = { aisle: "-", max: "-", point: "-" };
     if (storeVal !== "ALL") {
       const cleanStore = storeVal.replace(/^0+/, ''); 
@@ -324,7 +319,6 @@
     document.getElementById("ao-max").innerText = aoData.max || "-";
     document.getElementById("ao-point").innerText = aoData.point || "-";
 
-    // 実績テーブル描画
     if (!skipHistoryRender && currentHistoryMap) {
       let targetHistory = null;
       if (currentHistoryMap[storeVal]) {
@@ -408,7 +402,7 @@
     document.getElementById('reader').style.display = 'flex';
     document.getElementById('manual-input-group').style.display = 'flex';
     document.getElementById('manual-code').value = ""; 
-    document.getElementById('status').innerText = "バーコードにかざすか、手入力してください";
+    document.getElementById('status').innerText = "バーコードにかざすか、コードを入力して検索してください";
     
     setTimeout(() => {
       if (html5QrCode) {
